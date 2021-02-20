@@ -1,0 +1,1 @@
+D:\unrealProjects\UE4ShaderPluginDemo-4.25\Plugins\Developer\RiderLink\Intermediate\Build\Win64\UE4Editor\Development\RD\Definitions.h

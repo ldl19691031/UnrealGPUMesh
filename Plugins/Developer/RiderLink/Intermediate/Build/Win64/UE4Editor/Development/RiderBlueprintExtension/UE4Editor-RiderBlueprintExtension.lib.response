@@ -1,0 +1,13 @@
+/NOLOGO
+/errorReport:prompt
+/MACHINE:x64
+/SUBSYSTEM:WINDOWS
+/DEF
+/NAME:"UE4Editor-RiderBlueprintExtension.dll"
+/IGNORE:4221
+/NODEFAULTLIB
+"D:\unrealProjects\UE4ShaderPluginDemo-4.25\Intermediate\Build\Win64\ShaderPluginDemoEditor\Development\UnrealEd\SharedPCH.UnrealEd.RTTI.ShadowErrors.h.obj"
+"D:\unrealProjects\UE4ShaderPluginDemo-4.25\Plugins\Developer\RiderLink\Intermediate\Build\Win64\UE4Editor\Development\RiderBlueprintExtension\Module.RiderBlueprintExtension.cpp.obj"
+"D:\unrealProjects\UE4ShaderPluginDemo-4.25\Plugins\Developer\RiderLink\Intermediate\Build\Win64\UE4Editor\Development\RiderBlueprintExtension\Default.rc2.res"
+/OUT:"D:\unrealProjects\UE4ShaderPluginDemo-4.25\Plugins\Developer\RiderLink\Intermediate\Build\Win64\UE4Editor\Development\RiderBlueprintExtension\UE4Editor-RiderBlueprintExtension.lib"
+/INCLUDE:IMPLEMENT_MODULE_RiderBlueprintExtension
