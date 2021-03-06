@@ -10,6 +10,9 @@
 class FGPUMeshShader
 {
 public:
+	static void UpdateSDFTextureByBrushGPU(FRHICommandListImmediate& RHICmdList,
+	                                       const FGPUMeshParameters& DrawParameters,
+	                                       FTexture3DRHIRef SDFTexture, FUnorderedAccessViewRHIRef SDFTextureUAV);
 	static void RunComputeShader_RenderThread(
 		FRHICommandListImmediate& RHICmdList,
 		const FGPUMeshParameters& DrawParameters,

@@ -80,6 +80,15 @@ void AShaderUsageDemoCharacter::BeginPlay()
 	// 		ETextureSourceFormat::TSF_G16
 	// 	);
 	// }
+	FGPUMeshParameters GPUMeshParameters;
+	GPUMeshParameters.OutputVertexPositionImage = this->GPUMeshRenderTarget;
+	GPUMeshParameters.SDFTexture = this->GPUMeshSDFTexture ;
+	GPUMeshParameters.SDFTextureSize = FIntVector(
+        this->GPUMeshSDFTexture->GetSizeX(),
+        this->GPUMeshSDFTexture->GetSizeY(),
+        this->GPUMeshSDFTexture->GetSizeZ()
+        );
+	FShaderDeclarationDemoModule::Get().UpdateGPUMeshParameters(GPUMeshParameters);
 	FShaderDeclarationDemoModule::Get().BeginRendering();
 }
 
@@ -127,14 +136,8 @@ void AShaderUsageDemoCharacter::Tick(float DeltaSeconds)
 	// We set it every frame here since we're updating the end color and simulation state. Boop.
 	FShaderDeclarationDemoModule::Get().UpdateParameters(DrawParameters);
 
-	FGPUMeshParameters GPUMeshParameters;
+	FGPUMeshParameters GPUMeshParameters = FShaderDeclarationDemoModule::Get().GetGPUMeshParameters();
 	GPUMeshParameters.OutputVertexPositionImage = this->GPUMeshRenderTarget;
-	GPUMeshParameters.SDFTexture = this->GPUMeshSDFTexture ;
-	GPUMeshParameters.SDFTextureSize = FIntVector(
-		this->GPUMeshSDFTexture->GetSizeX(),
-		this->GPUMeshSDFTexture->GetSizeY(),
-		this->GPUMeshSDFTexture->GetSizeZ()
-		);
 	FShaderDeclarationDemoModule::Get().UpdateGPUMeshParameters(GPUMeshParameters);
 
 }

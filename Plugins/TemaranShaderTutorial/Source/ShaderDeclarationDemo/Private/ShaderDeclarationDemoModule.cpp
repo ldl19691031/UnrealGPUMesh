@@ -83,14 +83,24 @@ void FShaderDeclarationDemoModule::UpdateParameters(FShaderUsageExampleParameter
 
 void FShaderDeclarationDemoModule::UpdateGPUMeshParameters(FGPUMeshParameters& GPUMeshParameters)
 {
-	if (GPUMeshParameters.OutputVertexPositionImage->bCanCreateUAV == false)
-	{
-		GPUMeshParameters.OutputVertexPositionImage->bCanCreateUAV = true;
-	}
+	// if (GPUMeshParameters.OutputVertexPositionImage->bCanCreateUAV == false)
+	// {
+	// 	GPUMeshParameters.OutputVertexPositionImage->bCanCreateUAV = true;
+	// }
 	RenderEveryFrameLock.Lock();
-	CachedGPUMeshParameters = GPUMeshParameters;
+	if (GPUMeshParameters.OutputVertexPositionImage!= nullptr)
+	{
+		CachedGPUMeshParameters.OutputVertexPositionImage = GPUMeshParameters.OutputVertexPositionImage;
+	}
+	CachedGPUMeshParameters.BrushList = GPUMeshParameters.BrushList;
+	CachedGPUMeshParameters.SDFTexture = GPUMeshParameters.SDFTexture;
 	bCachedParametersValid = true;
 	RenderEveryFrameLock.Unlock();
+}
+
+FGPUMeshParameters FShaderDeclarationDemoModule::GetGPUMeshParameters()
+{
+	return CachedGPUMeshParameters;
 }
 
 void FShaderDeclarationDemoModule::PostResolveSceneColor_RenderThread(FRHICommandListImmediate& RHICmdList, class FSceneRenderTargets& SceneContext)

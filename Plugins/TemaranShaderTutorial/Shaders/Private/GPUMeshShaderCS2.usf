@@ -1,0 +1,32 @@
+﻿
+
+Texture3D<float4> InputTexture;
+RWTexture2D<float4> OutputTexture;
+Texture2D<uint> TriTableTexture;
+RWStructuredBuffer<int> RWVertexCounterBuffer;
+float4 InputTextureSize;
+float4 InputSlice;
+//Marching Cube
+float isoLevel;
+int gridSize;
+groupshared int vertexCounter;
+SamplerState myLinearClampSampler;
+
+[numthreads(THREADGROUPSIZE_X, THREADGROUPSIZE_Y, THREADGROUPSIZE_Z)]
+void MainComputeShader(uint3 threadId : SV_DispatchThreadID)
+{
+	//OutputBufferTest.Append(float4(threadId, 1.0f));
+	// uint InputSizeX, InputSizeY, InputSizeZ;
+	// InputTexture.GetDimensions(InputSizeX,InputSizeY,InputSizeZ);
+	// if (ThreadId.x >= InputSizeX || ThreadId.y >= InputSizeY || ThreadId.z >= InputSizeZ)
+	// {
+	// 	return;
+	// }
+	// float4 data = InputTexture[ThreadId.xyz];
+	// float sdf = data.x;
+	// uint2 texCoord = pos2texCo(ThreadId, (uint3)(InputTextureSize.xyz), (uint2)InputSlice.xy);
+	uint outputTextureWidth, outputTextureHeight;
+	OutputTexture.GetDimensions(outputTextureWidth,outputTextureHeight);
+
+	
+}

@@ -10,6 +10,7 @@
 #include "RHICommandList.h"
 #include "Engine/VolumeTexture.h"
 #include "MarchingCubeDef.h"
+
 #define NUM_THREADS_PER_GROUP_DIMENSION 8
 /**********************************************************************************************/
 /* This class carries our parameter declarations and acts as the bridge between cpp and HLSL. */
@@ -88,11 +89,35 @@ public:
 	}
 
 };
+
+class FGPUSDFModifyCS : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FGPUSDFModifyCS);
+	SHADER_USE_PARAMETER_STRUCT(FGPUSDFModifyCS, FGlobalShader);
+
+	struct Brush
+	{
+		FVector position;
+		float radius;
+	};
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+            SHADER_PARAMETER_SRV(StructuredBuffer<Brush>,InputBrushList)
+            SHADER_PARAMETER_UAV(RWTexture3D<float4>, OutputTexture)
+			SHADER_PARAMETER(uint32, BrushCount)
+      END_SHADER_PARAMETER_STRUCT()
+public:
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+};
 // This will tell the engine to create the shader and where the shader entry point is.
 //                            ShaderType                            ShaderPath                     Shader function name    Type
 IMPLEMENT_GLOBAL_SHADER(FGPUMeshShaderCS, "/TutorialShaders/Private/GPUMeshShaderCS.usf", "MainComputeShader", SF_Compute);
 IMPLEMENT_GLOBAL_SHADER(FGPUMeshCopyToTextureCS, "/TutorialShaders/Private/GPUMeshCopyToTextureCS.usf", "MainComputeShader", SF_Compute);
-
+IMPLEMENT_GLOBAL_SHADER(FGPUSDFModifyCS, "/TutorialShaders/Private/GPUSDFModifier.usf","MainComputeShader",SF_Compute);
 
 
 static FTexture2DRHIRef TriLookUpTexture;
@@ -101,7 +126,41 @@ static FUnorderedAccessViewRHIRef VertexCounterBufferUAV;
 static FStructuredBufferRHIRef AppendBufferTest;
 static FUnorderedAccessViewRHIRef AppendBufferUAV;
 static FUnorderedAccessViewRHIRef ConsumeBufferUAV;
+static FStructuredBufferRHIRef BrushBuffer;
+static FShaderResourceViewRHIRef BrushBufferShaderResourceView;
 static FSamplerStateRHIRef SamplerState;
+static FTexture2DRHIRef ShaderOutputTexture;
+static FUnorderedAccessViewRHIRef ShaderOutputTextureUAV;
+void FGPUMeshShader::UpdateSDFTextureByBrushGPU(FRHICommandListImmediate& RHICmdList, const FGPUMeshParameters& DrawParameters, FTexture3DRHIRef SDFTexture, FUnorderedAccessViewRHIRef SDFTextureUAV)
+{
+	if (BrushBuffer.IsValid() == false)
+	{
+		FRHIResourceCreateInfo rhiCreateInfo;
+		BrushBuffer = RHICreateStructuredBuffer(
+			sizeof(FGPUSDFModifyCS::Brush),
+			sizeof(FGPUSDFModifyCS::Brush) * 64,
+			BUF_ShaderResource| BUF_UnorderedAccess,
+			rhiCreateInfo
+		);
+		BrushBufferShaderResourceView = RHICreateShaderResourceView(BrushBuffer);
+			
+	}
+	FGPUSDFModifyCS::FParameters SdfShaderParameters;
+	SdfShaderParameters.BrushCount = DrawParameters.BrushList.Num();
+	void* LockedMemory = RHILockStructuredBuffer(BrushBuffer,0, BrushBuffer->GetSize(),EResourceLockMode::RLM_WriteOnly);
+	FMemory::Memcpy(LockedMemory,DrawParameters.BrushList.GetData(),BrushBuffer->GetSize());
+	RHIUnlockStructuredBuffer(BrushBuffer);
+	SdfShaderParameters.InputBrushList = BrushBufferShaderResourceView;
+	SdfShaderParameters.OutputTexture = SDFTextureUAV;
+	TShaderMapRef<FGPUSDFModifyCS> SDFComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+	FIntVector GroupCounts = FIntVector(
+		SDFTexture->GetSizeX() / 8,
+		SDFTexture->GetSizeY() / 8,
+		1
+	);
+	FComputeShaderUtils::Dispatch(RHICmdList,SDFComputeShader, SdfShaderParameters, GroupCounts);
+}
+
 void FGPUMeshShader::RunComputeShader_RenderThread(
 	FRHICommandListImmediate& RHICmdList, 
 	const FGPUMeshParameters& DrawParameters, 
@@ -118,11 +177,21 @@ void FGPUMeshShader::RunComputeShader_RenderThread(
 	RHICmdList.TransitionResource(EResourceTransitionAccess::ERWBarrier, EResourceTransitionPipeline::EGfxToCompute, ComputeShaderOutputUAV);
 	FGPUMeshShaderCS::FParameters PassParameters;
 	FGPUMeshShaderCS::FParameters EmptyParameters;
+	
 	//PassParameters.InputTexture = ComputeShaderInputUAV;
 	FRHIResourceCreateInfo CreateInfo;
-	FTexture2DRHIRef Texture = RHICreateTexture2D(DrawParameters.OutputVertexPositionImage->SizeX, DrawParameters.OutputVertexPositionImage->SizeY, PF_A32B32G32R32F, 1, 1, TexCreate_ShaderResource | TexCreate_UAV, CreateInfo);
+
+	if (ShaderOutputTexture.IsValid() == false)
+	{
+		ShaderOutputTexture = RHICreateTexture2D(
+			DrawParameters.OutputVertexPositionImage->SizeX,
+			DrawParameters.OutputVertexPositionImage->SizeY,
+			PF_A32B32G32R32F,
+			1, 1,
+			TexCreate_ShaderResource | TexCreate_UAV, CreateInfo);
+		ShaderOutputTextureUAV = RHICreateUnorderedAccessView(ShaderOutputTexture);
+	}
 	FTexture2DRHIRef OriginalRT = DrawParameters.OutputVertexPositionImage->GetRenderTargetResource()->GetRenderTargetTexture();
-	FUnorderedAccessViewRHIRef TextureUAV = RHICreateUnorderedAccessView(Texture);
 	FTexture3DRHIRef SDFTexture = RHICreateTexture3D(
 	DrawParameters.SDFTexture->GetSizeX(),
 	DrawParameters.SDFTexture->GetSizeY(),
@@ -156,19 +225,29 @@ void FGPUMeshShader::RunComputeShader_RenderThread(
 	PassParameters.RWVertexCounterBuffer = VertexCounterBufferUAV;
 	
 	FUnorderedAccessViewRHIRef SDFTextureUAV = RHICreateUnorderedAccessView(SDFTexture);
+
+	if (DrawParameters.BrushList.Num()>0)
+	{
+		UpdateSDFTextureByBrushGPU(RHICmdList, DrawParameters, SDFTexture, SDFTextureUAV);
+	}
 	
 	PassParameters.InputTexture = SDFTexture;
-	RHICmdList.TransitionResource(EResourceTransitionAccess::ERWBarrier, EResourceTransitionPipeline::EGfxToCompute, TextureUAV);
+	RHICmdList.TransitionResource(EResourceTransitionAccess::ERWBarrier, EResourceTransitionPipeline::EGfxToCompute, ShaderOutputTextureUAV);
 	//RHIGetDefaultContext()->RHIClearUAVFloat(TextureUAV, FVector4(0.0f));
-	PassParameters.OutputTexture = TextureUAV;//DrawParameters.OutputVertexPositionImage->GetRenderTargetResource()->GetRenderTargetUAV();
+	PassParameters.OutputTexture = ShaderOutputTextureUAV;//DrawParameters.OutputVertexPositionImage->GetRenderTargetResource()->GetRenderTargetUAV();
 	PassParameters.InputTextureSize = FVector4(DrawParameters.SDFTexture->GetSizeX(), DrawParameters.SDFTexture->GetSizeY(), DrawParameters.SDFTexture->GetSizeZ(), 0);
-	PassParameters.InputSlice = FVector4(Texture->GetSizeX() / SDFTexture->GetSizeX(), Texture->GetSizeY() / SDFTexture->GetSizeY(), 0, 0);
+	PassParameters.InputSlice = FVector4(ShaderOutputTexture->GetSizeX() / SDFTexture->GetSizeX(), ShaderOutputTexture->GetSizeY() / SDFTexture->GetSizeY(), 0, 0);
 	PassParameters.isoLevel = 0.5f;
 	PassParameters.gridSize = SDFTexture->GetSizeX();
 	PassParameters.vertexCounter = 0;
 	if (SamplerState.IsValid() == false)
 	{
-		SamplerState =  RHICreateSamplerState(FSamplerStateInitializerRHI());
+		SamplerState =  RHICreateSamplerState(FSamplerStateInitializerRHI(
+			ESamplerFilter::SF_Trilinear,
+			ESamplerAddressMode::AM_Clamp,
+			ESamplerAddressMode::AM_Clamp,
+			ESamplerAddressMode::AM_Clamp
+		));
 	}
 	PassParameters.myLinearClampSampler = SamplerState;
 	if (TriLookUpTexture.IsValid() == false)
@@ -214,10 +293,8 @@ void FGPUMeshShader::RunComputeShader_RenderThread(
 
 	FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader, PassParameters, GroupCounts);
 
-	RHIAcquireTransientResource(Texture);
+	RHIAcquireTransientResource(ShaderOutputTexture);
 	FRHICopyTextureInfo CopyInfo = FRHICopyTextureInfo();
 
-	RHICmdList.CopyToResolveTarget(Texture, OriginalRT, FResolveParams());
-	Texture.SafeRelease();
-
+	RHICmdList.CopyToResolveTarget(ShaderOutputTexture, OriginalRT, FResolveParams());
 }

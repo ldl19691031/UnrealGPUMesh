@@ -46,7 +46,12 @@ struct FGPUMeshParameters
 	UVolumeTexture* SDFTexture;
 	FIntVector SDFTextureSize;
 	UTextureRenderTarget2D* OutputVertexPositionImage;
-
+	struct FBrushParameter
+	{
+		FVector center;
+		float radius;
+	};
+	TArray<FBrushParameter> BrushList;
 	FIntPoint GetRenderTargetSize() const
 	{
 		return CachedRenderTargetSize;
@@ -115,7 +120,7 @@ public:
 	void UpdateParameters(FShaderUsageExampleParameters& DrawParameters);
 
 	void UpdateGPUMeshParameters(FGPUMeshParameters& GPUMeshParameters);
-
+	FGPUMeshParameters GetGPUMeshParameters();
 private:
 	TRefCountPtr<IPooledRenderTarget> ComputeShaderOutput;
 	TRefCountPtr<IPooledRenderTarget> SDFRenderTarget;

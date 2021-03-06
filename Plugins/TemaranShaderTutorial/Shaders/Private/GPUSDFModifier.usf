@@ -1,0 +1,46 @@
+﻿#include "/Engine/Public/Platform.ush"
+struct Brush
+{
+	float3 position;
+	float radius;
+};
+
+StructuredBuffer<Brush> InputBrushList;
+RWTexture3D<float4> OutputTexture;
+uint BrushCount;
+
+[numthreads(8, 8, 1)]
+void MainComputeShader(uint3 threadId : SV_DispatchThreadID)
+{
+	uint x = threadId.x;
+	uint y = threadId.y;
+	//uint brushCount, stride;
+	uint width,height,depth;
+	OutputTexture.GetDimensions(width, height,depth);
+	//InputBrushList.GetDimensions(brushCount,stride);
+	if (BrushCount == 0)
+	{
+		return;
+	}
+	if (x > width || y > height)
+	{
+		return;
+	}
+	
+	for (int i = 0; i < depth; i++)
+	{
+		uint z = i;
+		float3 gridPos = float3(x,y,z) * 100.0f;
+		for (int j =0; j < BrushCount; j++)
+		{
+			Brush brush = InputBrushList[j];
+			float distToBrushCenter = length(brush.position - gridPos);
+			if (distToBrushCenter < brush.radius)
+			{
+				OutputTexture[uint3(x,y,z)] = float4(1,1,1,1);
+			}
+			
+		}
+	}
+	
+}
