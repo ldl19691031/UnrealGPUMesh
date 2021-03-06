@@ -1,10 +1,34 @@
 
 #include "/Engine/Public/Platform.ush"
+#include "MarchingCube.ush"
 
 Texture3D<float4> InputTexture;
 RWTexture2D<float4> OutputTexture;
+Texture2D<uint> TriTableTexture;
+RWStructuredBuffer<int> RWVertexCounterBuffer;
+AppendStructuredBuffer<Triangle> OutputBufferTest;
 float4 InputTextureSize;
 float4 InputSlice;
+//Marching Cube
+float isoLevel;
+int gridSize;
+groupshared int vertexCounter;
+SamplerState myLinearClampSampler;
+
+float SampleData(int3 pos) {
+	return InputTexture.Load(int4(pos, 0)).x;
+}
+
+float SampleLinear(float3 p)
+{
+	// need to mitigate the offset in p[x], so +float3(0.5) to be in [0;1] range
+	return InputTexture.SampleLevel(myLinearClampSampler, p + float3(0.5, 0.5, 0.5), 0).x;
+}
+
+float3 VertexInterp(float3 p1, float3 p2, float valp1, float valp2)
+{
+	return lerp(p1, p2, (isoLevel - valp1) / (valp2 - valp1));
+}
 
 uint2 pos2texCo(uint3 pos, uint3 textureSize, uint2 slice)
 {
@@ -14,24 +38,163 @@ uint2 pos2texCo(uint3 pos, uint3 textureSize, uint2 slice)
 	offset.y = (z - (z / slice.x) * slice.x) * textureSize.y;
 	return offset + pos.xy;
 }
-[numthreads(THREADGROUPSIZE_X, THREADGROUPSIZE_Y, THREADGROUPSIZE_Z)]
-void MainComputeShader(uint3 ThreadId : SV_DispatchThreadID)
+float3 CalculateGradient(float3 p)
 {
-	uint InputSizeX, InputSizeY, InputSizeZ;
-	InputTexture.GetDimensions(InputSizeX,InputSizeY,InputSizeZ);
-	if (ThreadId.x >= InputSizeX || ThreadId.y >= InputSizeY || ThreadId.z >= InputSizeZ)
-	{
-		return;
-	}
-	float4 data = InputTexture[ThreadId.xyz];
-	float sdf = data.x;
-	uint2 texCoord = pos2texCo(ThreadId, (uint3)(InputTextureSize.xyz), (uint2)InputSlice.xy);
+	float ratio = 1.0 / (gridSize - 1);
+
+	return float3(
+        SampleLinear(p - float3(1.0, 0.0, 0.0) * ratio)
+        - SampleLinear(p + float3(1.0, 0.0, 0.0) * ratio),
+
+        SampleLinear(p - float3(0.0, 1.0, 0.0) * ratio)
+        - SampleLinear(p + float3(0.0, 1.0, 0.0) * ratio),
+
+        SampleLinear(p - float3(0.0, 0.0, 1.0) * ratio)
+        - SampleLinear(p + float3(0.0, 0.0, 1.0) * ratio)
+        );
+}
+
+
+[numthreads(THREADGROUPSIZE_X, THREADGROUPSIZE_Y, THREADGROUPSIZE_Z)]
+void MainComputeShader(uint3 threadId : SV_DispatchThreadID)
+{
+	//OutputBufferTest.Append(float4(threadId, 1.0f));
+	// uint InputSizeX, InputSizeY, InputSizeZ;
+	// InputTexture.GetDimensions(InputSizeX,InputSizeY,InputSizeZ);
+	// if (ThreadId.x >= InputSizeX || ThreadId.y >= InputSizeY || ThreadId.z >= InputSizeZ)
+	// {
+	// 	return;
+	// }
+	// float4 data = InputTexture[ThreadId.xyz];
+	// float sdf = data.x;
+	// uint2 texCoord = pos2texCo(ThreadId, (uint3)(InputTextureSize.xyz), (uint2)InputSlice.xy);
 	uint outputTextureWidth, outputTextureHeight;
 	OutputTexture.GetDimensions(outputTextureWidth,outputTextureHeight);
 
-	//sdf = InputTexture[uint3(ThreadId.xy, 60)];
-	if (texCoord.x < outputTextureWidth && texCoord.y < outputTextureHeight)
+
+
+	//Clear Render Target
+	// int linearIndex = threadId.x * THREADGROUPSIZE_X * THREADGROUPSIZE_Y + threadId.y * THREADGROUPSIZE_Y + threadId.z;
+	// if (linearIndex < outputTextureHeight)
+	// {
+	// 	for (int i = 0 ; i < outputTextureWidth; i ++ )
+	// 	{
+	// 		OutputTexture[uint2(linearIndex, i)] = float4(0.0f, 0.0f, 0.0f, 0.5f);
+	// 	}
+	// }
+	// if (linearIndex == 0)
+	// {
+	// 	RWVertexCounterBuffer[0] = 0;
+	// }
+	// AllMemoryBarrierWithGroupSync();
+	//
+	// //sdf = InputTexture[uint3(ThreadId.xy, 60)];
+	// if (texCoord.x < outputTextureWidth && texCoord.y < outputTextureHeight)
+	// {
+	// 	OutputTexture[texCoord] = float4(sdf,1.0f - sdf,float(texCoord.x) / outputTextureWidth,float(texCoord.y) / outputTextureHeight);
+	// }
+	float3 offset = float3(-0.5, -0.5, -0.5);
+	float3 vertics[3];
+	float3 p[8] = {
+		p[0] = (threadId + float3(0, 0, 1)) / (gridSize - 1) + offset,
+        p[1] = (threadId + float3(1, 0, 1)) / (gridSize - 1) + offset,
+        p[2] = (threadId + float3(1, 0, 0)) / (gridSize - 1) + offset,
+        p[3] = (threadId + float3(0, 0, 0)) / (gridSize - 1) + offset,
+        p[4] = (threadId + float3(0, 1, 1)) / (gridSize - 1) + offset,
+        p[5] = (threadId + float3(1, 1, 1)) / (gridSize - 1) + offset,
+        p[6] = (threadId + float3(1, 1, 0)) / (gridSize - 1) + offset,
+        p[7] = (threadId + float3(0, 1, 0)) / (gridSize - 1) + offset
+    };
+
+	float val[8] = {
+		SampleData(threadId + int3(0, 0, 1)),
+        SampleData(threadId + int3(1, 0, 1)),
+        SampleData(threadId + int3(1, 0, 0)),
+        SampleData(threadId + int3(0, 0, 0)),
+        SampleData(threadId + int3(0, 1, 1)),
+        SampleData(threadId + int3(1, 1, 1)),
+        SampleData(threadId + int3(1, 1, 0)),
+        SampleData(threadId + int3(0, 1, 0))
+    };
+
+	int cubeIndex = 0;
+	if (val[0] < isoLevel) cubeIndex |= 1;
+	if (val[1] < isoLevel) cubeIndex |= 2;
+	if (val[2] < isoLevel) cubeIndex |= 4;
+	if (val[3] < isoLevel) cubeIndex |= 8;
+	if (val[4] < isoLevel) cubeIndex |= 16;
+	if (val[5] < isoLevel) cubeIndex |= 32;
+	if (val[6] < isoLevel) cubeIndex |= 64;
+	if (val[7] < isoLevel) cubeIndex |= 128;
+
+	float3 vertlist[12];
+	
+	if (edgeTable[cubeIndex] != 0)
 	{
-		OutputTexture[texCoord] = float4(sdf,1.0f - sdf,float(texCoord.x) / outputTextureWidth,float(texCoord.y) / outputTextureHeight);
+		if (edgeTable[cubeIndex] & 1)
+			vertlist[0] = VertexInterp(p[0], p[1], val[0], val[1]);
+		if (edgeTable[cubeIndex] & 2)
+			vertlist[1] = VertexInterp(p[1], p[2], val[1], val[2]);
+		if (edgeTable[cubeIndex] & 4)
+			vertlist[2] = VertexInterp(p[2], p[3], val[2], val[3]);
+		if (edgeTable[cubeIndex] & 8)
+			vertlist[3] = VertexInterp(p[3], p[0], val[3], val[0]);
+		if (edgeTable[cubeIndex] & 16)
+			vertlist[4] = VertexInterp(p[4], p[5], val[4], val[5]);
+		if (edgeTable[cubeIndex] & 32)
+			vertlist[5] = VertexInterp(p[5], p[6], val[5], val[6]);
+		if (edgeTable[cubeIndex] & 64)
+			vertlist[6] = VertexInterp(p[6], p[7], val[6], val[7]);
+		if (edgeTable[cubeIndex] & 128)
+			vertlist[7] = VertexInterp(p[7], p[4], val[7], val[4]);
+		if (edgeTable[cubeIndex] & 256)
+			vertlist[8] = VertexInterp(p[0], p[4], val[0], val[4]);
+		if (edgeTable[cubeIndex] & 512)
+			vertlist[9] = VertexInterp(p[1], p[5], val[1], val[5]);
+		if (edgeTable[cubeIndex] & 1024)
+			vertlist[10] = VertexInterp(p[2], p[6], val[2], val[6]);
+		if (edgeTable[cubeIndex] & 2048)
+			vertlist[11] = VertexInterp(p[3], p[7], val[3], val[7]);
+
+		for (int i = 0; TriTableTexture[uint2(i,cubeIndex)] != 255; i += 3) {
+
+			int localIndex;
+			InterlockedAdd(RWVertexCounterBuffer[0],3,localIndex);
+			
+			Triangle t;
+
+			Vertex v0;
+			Vertex v1;
+			Vertex v2;
+
+			v0.vPosition = vertlist[TriTableTexture[uint2(i,cubeIndex)]];
+			v1.vPosition = vertlist[TriTableTexture[uint2(i+ 1,cubeIndex)]];
+			v2.vPosition = vertlist[TriTableTexture[uint2(i+2, cubeIndex)]];
+
+			v0.vNormal = normalize(CalculateGradient(v0.vPosition));
+			v1.vNormal = normalize(CalculateGradient(v1.vPosition));
+			v2.vNormal = normalize(CalculateGradient(v2.vPosition));
+
+			t.v[0] = v0;
+			t.v[1] = v2;
+			t.v[2] = v1;
+			
+			
+			//OutputBufferTest.Append(t);
+			for (int j = 0; j < 3; j++)
+			{
+				uint2 texCoord;
+				texCoord.y = (localIndex + j) / outputTextureWidth;
+				texCoord.x = (localIndex + j) - texCoord.y * outputTextureWidth;
+				OutputTexture[texCoord] = float4(t.v[j].vPosition, 1.0f);
+				OutputTexture[texCoord + uint2(0, outputTextureHeight / 2)] = float4(t.v[j].vNormal, 1.0f);
+				// if (localIndex + j < outputTextureWidth)
+				// {
+				// 	OutputTexture[uint2(localIndex + j, 0 )] = float4(t.v[j].vPosition, 1.0f);
+				// }
+			}
+			
+			
+		}
 	}
 }

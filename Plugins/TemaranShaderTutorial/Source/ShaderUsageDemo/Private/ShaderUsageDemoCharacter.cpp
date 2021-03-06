@@ -59,27 +59,27 @@ void AShaderUsageDemoCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 	FP_Gun->AttachToComponent(Mesh1P, FAttachmentTransformRules::SnapToTargetIncludingScale, TEXT("GripPoint"));
-	if (GPUMeshSDFTexture != NULL)
-	{
-		FVector center = FVector(SDFTextureSize.X / 2, SDFTextureSize.Y / 2, SDFTextureSize.Z / 2);
-		GPUMeshSDFTexture->UpdateSourceFromFunction(
-			[=](int x, int y, int z, void* output)
-			{
-				FVector pos = FVector(x,y,z);
-				if (FVector::Distance(center,pos) < DebugMeshRadius)
-				{
-					*((FFloat16*)output) = FFloat16(1.0f);
-				}else
-				{
-					*((FFloat16*)output) = FFloat16(0.0f);
-				}
-			},
-			SDFTextureSize.X,
-			SDFTextureSize.Y,
-			SDFTextureSize.Z,
-			ETextureSourceFormat::TSF_G16
-		);
-	}
+	// if (GPUMeshSDFTexture != NULL)
+	// {
+	// 	FVector center = FVector(SDFTextureSize.X / 2, SDFTextureSize.Y / 2, SDFTextureSize.Z / 2);
+	// 	GPUMeshSDFTexture->UpdateSourceFromFunction(
+	// 		[=](int x, int y, int z, void* output)
+	// 		{
+	// 			FVector pos = FVector(x,y,z);
+	// 			if (FVector::Distance(center,pos) < DebugMeshRadius)
+	// 			{
+	// 				*((FFloat16*)output) = FFloat16(1.0f);
+	// 			}else
+	// 			{
+	// 				*((FFloat16*)output) = FFloat16(0.0f);
+	// 			}
+	// 		},
+	// 		SDFTextureSize.X,
+	// 		SDFTextureSize.Y,
+	// 		SDFTextureSize.Z,
+	// 		ETextureSourceFormat::TSF_G16
+	// 	);
+	// }
 	FShaderDeclarationDemoModule::Get().BeginRendering();
 }
 

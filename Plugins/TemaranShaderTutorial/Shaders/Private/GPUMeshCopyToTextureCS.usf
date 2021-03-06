@@ -1,0 +1,28 @@
+﻿#include "/Engine/Public/Platform.ush"
+#include "MarchingCube.ush"
+
+RWStructuredBuffer<Triangle> OutputBufferTest2;
+RWTexture2D<float4> OutputTexture;
+
+[numthreads(32,32,1)]
+void MainComputeShader(uint3 threadId : SV_DispatchThreadID)
+{
+	uint outputTextureWidth, outputTextureHeight;
+	OutputTexture.GetDimensions(outputTextureWidth,outputTextureHeight);
+	//Clear Render Target
+	// int linearIndex = threadId.x * 32 * THREADGROUPSIZE_Y + threadId.y * THREADGROUPSIZE_Y + threadId.z;
+	// if (linearIndex < outputTextureHeight)
+	// {
+	// 	for (int i = 0 ; i < outputTextureWidth; i ++ )
+	// 	{
+	// 		OutputTexture[uint2(linearIndex, i)] = float4(0.0f, 0.0f, 0.0f, 0.5f);
+	// 	}
+	// }
+	// AllMemoryBarrierWithGroupSync();
+	uint linearIndex = threadId.x * 32 + threadId.y;
+	Triangle tri = OutputBufferTest2[linearIndex];
+	uint2 outCood = uint2(threadId.x * 3, threadId.y);
+	OutputTexture[outCood] = float4(tri.v[0].vPosition, 1.0f);
+	OutputTexture[outCood + uint2(1,0)] = float4(tri.v[1].vPosition, 1.0f);
+	OutputTexture[outCood + uint2(2,0)] = float4(tri.v[2].vPosition, 1.0f);
+}
