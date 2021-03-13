@@ -18,4 +18,10 @@ public:
 		const FGPUMeshParameters& DrawParameters,
 		FUnorderedAccessViewRHIRef ComputeShaderInputUAV,
 		FUnorderedAccessViewRHIRef ComputeShaderOutputUAV);
+
+	static void UpdateMeshBySDFGPU(
+		FRHICommandListImmediate& RHICmdList,
+		UVolumeTexture* SDFTexture,
+		FGPUMeshVertexBuffers* VertexBuffers
+	);
 };

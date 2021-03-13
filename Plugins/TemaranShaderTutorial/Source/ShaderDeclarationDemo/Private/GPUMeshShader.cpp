@@ -10,6 +10,7 @@
 #include "RHICommandList.h"
 #include "Engine/VolumeTexture.h"
 #include "MarchingCubeDef.h"
+#include "UGPUMeshComponent.h"
 
 #define NUM_THREADS_PER_GROUP_DIMENSION 8
 /**********************************************************************************************/
@@ -61,7 +62,53 @@ public:
 		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Z"), NUM_THREADS_PER_GROUP_DIMENSION);
 	}
 };
+class FGPUMeshShaderCS2 : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FGPUMeshShaderCS2);
+	SHADER_USE_PARAMETER_STRUCT(FGPUMeshShaderCS2, FGlobalShader);
 
+	struct Vertex
+	{
+		FVector vPosition;
+		FVector vNormal;
+	};
+
+	struct Triangle
+	{
+		Vertex v[3];
+	};
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+        //SHADER_PARAMETER_UAV(RWTexture3D<float4>, InputTexture)
+        SHADER_PARAMETER_TEXTURE(Texture3D<float4>, InputTexture)
+        SHADER_PARAMETER_TEXTURE(Texture2D<uint>, TriTableTexture)
+        SHADER_PARAMETER_UAV(RWStructuredBuffer<uint>, RWVertexCounterBuffer)
+        //SHADER_PARAMETER_UAV(RWTexture2D<float4>, OutputTexture)
+		SHADER_PARAMETER_UAV(RWStructuredBuffer<float3>, RWVertexPositionBuffer)
+        SHADER_PARAMETER_UAV(AppendStructuredBuffer<Triangle>,OutputBufferTest)
+        SHADER_PARAMETER_SAMPLER(SamplerState, myLinearClampSampler)
+        SHADER_PARAMETER(FVector4, InputTextureSize)
+        SHADER_PARAMETER(FVector4, InputSlice)
+        SHADER_PARAMETER(float,isoLevel)
+        SHADER_PARAMETER(int, gridSize)
+        SHADER_PARAMETER(int, vertexCounter)
+    END_SHADER_PARAMETER_STRUCT()
+
+public:
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	static inline void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_X"), NUM_THREADS_PER_GROUP_DIMENSION);
+		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Y"), NUM_THREADS_PER_GROUP_DIMENSION);
+		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Z"), NUM_THREADS_PER_GROUP_DIMENSION);
+	}
+};
 class FGPUMeshCopyToTextureCS : public FGlobalShader
 {
 public:
@@ -118,7 +165,7 @@ public:
 IMPLEMENT_GLOBAL_SHADER(FGPUMeshShaderCS, "/TutorialShaders/Private/GPUMeshShaderCS.usf", "MainComputeShader", SF_Compute);
 IMPLEMENT_GLOBAL_SHADER(FGPUMeshCopyToTextureCS, "/TutorialShaders/Private/GPUMeshCopyToTextureCS.usf", "MainComputeShader", SF_Compute);
 IMPLEMENT_GLOBAL_SHADER(FGPUSDFModifyCS, "/TutorialShaders/Private/GPUSDFModifier.usf","MainComputeShader",SF_Compute);
-
+IMPLEMENT_GLOBAL_SHADER(FGPUMeshShaderCS2, "/TutorialShaders/Private/GPUMeshShaderCS2.usf", "MainComputeShader", SF_Compute);
 
 static FTexture2DRHIRef TriLookUpTexture;
 static FStructuredBufferRHIRef VertexCounterBuffer;
@@ -297,4 +344,96 @@ void FGPUMeshShader::RunComputeShader_RenderThread(
 	FRHICopyTextureInfo CopyInfo = FRHICopyTextureInfo();
 
 	RHICmdList.CopyToResolveTarget(ShaderOutputTexture, OriginalRT, FResolveParams());
+}
+
+void FGPUMeshShader::UpdateMeshBySDFGPU(FRHICommandListImmediate& RHICmdList, UVolumeTexture* SDFTexture,
+                                        FGPUMeshVertexBuffers* VertexBuffers)
+{
+	QUICK_SCOPE_CYCLE_COUNTER(STAT_ShaderPlugin_GPUMeshComputeShaderUpdate); // Used to gather CPU profiling data for the UE4 session frontend
+	SCOPED_DRAW_EVENT(RHICmdList, ShaderPlugin_GPUMeshComputeShaderUpdate); // Used to profile GPU activity and add metadata to be consumed by for example RenderDoc
+	
+	if (SDFTexture == nullptr || VertexBuffers == nullptr)
+	{
+		return;
+	}
+	FGPUMeshShaderCS2::FParameters PassParameters;
+	FRHIResourceCreateInfo CreateInfo;
+	FTexture3DRHIRef SDFTextureNew = RHICreateTexture3D(
+    SDFTexture->GetSizeX(),
+    SDFTexture->GetSizeY(),
+    SDFTexture->GetSizeZ(),
+    PF_B8G8R8A8,
+    1,
+    TexCreate_ShaderResource | TexCreate_UAV,
+    CreateInfo
+    );
+	FRHICopyTextureInfo copyInfo;
+	{
+		copyInfo.NumMips = 0;
+		copyInfo.SourceMipIndex = 0;
+		copyInfo.DestMipIndex = 0;
+		copyInfo.NumSlices = SDFTexture->GetSizeZ();
+	}
+	RHICmdList.CopyTexture(SDFTexture->Resource->TextureRHI, SDFTextureNew, copyInfo);
+	PassParameters.InputTexture = SDFTextureNew;
+	if (VertexCounterBuffer.IsValid() == false)
+	{
+		FRHIResourceCreateInfo rhiCreateInfo;
+		VertexCounterBuffer = RHICreateStructuredBuffer(sizeof(int), sizeof(int), BUF_ShaderResource| BUF_UnorderedAccess,rhiCreateInfo);
+		VertexCounterBufferUAV = RHICreateUnorderedAccessView(VertexCounterBuffer,false,false);
+		
+		uint8* Buffer = (uint8*)RHILockStructuredBuffer(VertexCounterBuffer, 0, sizeof(int), RLM_WriteOnly);
+		(*(int*)(Buffer))= 0;
+		RHIUnlockStructuredBuffer(VertexCounterBuffer);
+	}
+	RHICmdList.TransitionResource(EResourceTransitionAccess::ERWBarrier, EResourceTransitionPipeline::EGfxToCompute, VertexCounterBufferUAV);
+	RHIGetDefaultContext()->RHIClearUAVUint(VertexCounterBufferUAV,FUintVector4(0));
+	
+	PassParameters.RWVertexCounterBuffer = VertexCounterBufferUAV;
+	
+	FUnorderedAccessViewRHIRef SDFTextureUAV = RHICreateUnorderedAccessView(SDFTextureNew);
+
+	PassParameters.InputTextureSize = FVector4(SDFTexture->GetSizeX(), SDFTexture->GetSizeY(), SDFTexture->GetSizeZ(), 0);
+	//PassParameters.InputSlice = FVector4(ShaderOutputTexture->GetSizeX() / SDFTexture->GetSizeX(), ShaderOutputTexture->GetSizeY() / SDFTexture->GetSizeY(), 0, 0);
+	PassParameters.isoLevel = 0.5f;
+	PassParameters.gridSize = SDFTexture->GetSizeX();
+	PassParameters.vertexCounter = 0;
+	if (SamplerState.IsValid() == false)
+	{
+		SamplerState =  RHICreateSamplerState(FSamplerStateInitializerRHI(
+            ESamplerFilter::SF_Trilinear,
+            ESamplerAddressMode::AM_Clamp,
+            ESamplerAddressMode::AM_Clamp,
+            ESamplerAddressMode::AM_Clamp
+        ));
+	}
+	PassParameters.myLinearClampSampler = SamplerState;
+	if (TriLookUpTexture.IsValid() == false)
+	{
+		FRHIResourceCreateInfo createInfoTexture;
+		TriLookUpTexture = RHICreateTexture2D(
+            16,
+            256,
+            PF_R8_UINT,
+            1,
+            1,
+            TexCreate_ShaderResource | TexCreate_UAV,
+            createInfoTexture
+            );
+		uint32 DestStride;
+		void* data = RHICmdList.LockTexture2D(TriLookUpTexture,0, EResourceLockMode::RLM_WriteOnly,DestStride, false);
+		memcpy(data, triTable, sizeof(triTable) * sizeof(uint8));
+		RHICmdList.UnlockTexture2D(TriLookUpTexture, 0, false);
+	}
+	PassParameters.TriTableTexture = TriLookUpTexture;
+	
+	TShaderMapRef<FGPUMeshShaderCS2> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+	FIntVector GroupCounts = FIntVector(
+        SDFTexture->GetSizeX() / NUM_THREADS_PER_GROUP_DIMENSION,
+        SDFTexture->GetSizeY() / NUM_THREADS_PER_GROUP_DIMENSION,
+        SDFTexture->GetSizeZ() / NUM_THREADS_PER_GROUP_DIMENSION
+        );
+
+	PassParameters.RWVertexPositionBuffer = VertexBuffers->PositionVertexBuffer.UnorderedAccessViewRHI;
+	FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader, PassParameters, GroupCounts);
 }

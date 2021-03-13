@@ -16,7 +16,7 @@
 #include "RenderTargetPool.h"
 #include "Runtime/Core/Public/Modules/ModuleManager.h"
 #include "Interfaces/IPluginManager.h"
-
+#include "UGPUMeshComponent.h"
 IMPLEMENT_MODULE(FShaderDeclarationDemoModule, ShaderDeclarationDemo)
 
 // Declare some GPU stats so we can track them later
@@ -98,6 +98,23 @@ void FShaderDeclarationDemoModule::UpdateGPUMeshParameters(FGPUMeshParameters& G
 	RenderEveryFrameLock.Unlock();
 }
 
+void FShaderDeclarationDemoModule::UpdateGPUMesh(UVolumeTexture* SDFTexture, FGPUMeshVertexBuffers* VertexBuffers)
+{
+	UpdateMeshRequests=
+		[=]()
+		{
+			FRHICommandListImmediate& RHICmdList = GRHICommandList.GetImmediateCommandList();
+	
+		    FGPUMeshShader::UpdateMeshBySDFGPU(
+		        RHICmdList,
+		        SDFTexture,
+		        VertexBuffers
+		    );
+		}
+	;
+	
+}
+
 FGPUMeshParameters FShaderDeclarationDemoModule::GetGPUMeshParameters()
 {
 	return CachedGPUMeshParameters;
@@ -158,5 +175,6 @@ void FShaderDeclarationDemoModule::Draw_RenderThread(
 	FComputeShaderExample::RunComputeShader_RenderThread(RHICmdList, DrawParameters, ComputeShaderOutput->GetRenderTargetItem().UAV);
 	FPixelShaderExample::DrawToRenderTarget_RenderThread(RHICmdList, DrawParameters, ComputeShaderOutput->GetRenderTargetItem().TargetableTexture);
 	FGPUMeshShader::RunComputeShader_RenderThread(RHICmdList, GPUMeshDrawParameters, SDFRenderTarget->GetRenderTargetItem().UAV, GPUMeshShaderOutput->GetRenderTargetItem().UAV);
-
+	
+	UpdateMeshRequests();
 }

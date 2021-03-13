@@ -11,6 +11,7 @@
 
 #include "RenderGraphResources.h"
 #include "Runtime/Engine/Classes/Engine/TextureRenderTarget2D.h"
+#include <functional>
 
 // This struct contains all the data we need to pass from the game thread to draw our effect.
 struct FShaderUsageExampleParameters
@@ -120,6 +121,13 @@ public:
 	void UpdateParameters(FShaderUsageExampleParameters& DrawParameters);
 
 	void UpdateGPUMeshParameters(FGPUMeshParameters& GPUMeshParameters);
+
+	void UpdateGPUMesh(
+		/* In */
+		class UVolumeTexture* SDFTexture,
+		/* Out*/
+		struct FGPUMeshVertexBuffers* VertexBuffers
+	);
 	FGPUMeshParameters GetGPUMeshParameters();
 private:
 	TRefCountPtr<IPooledRenderTarget> ComputeShaderOutput;
@@ -129,6 +137,7 @@ private:
 	FGPUMeshParameters CachedGPUMeshParameters;
 	FDelegateHandle OnPostResolvedSceneColorHandle;
 	FCriticalSection RenderEveryFrameLock;
+	std::function<void(void)> UpdateMeshRequests;
 	volatile bool bCachedParametersValid;
 
 	void PostResolveSceneColor_RenderThread(FRHICommandListImmediate& RHICmdList, class FSceneRenderTargets& SceneContext);

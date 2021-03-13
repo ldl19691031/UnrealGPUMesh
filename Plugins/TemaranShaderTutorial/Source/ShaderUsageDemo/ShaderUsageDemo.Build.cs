@@ -17,6 +17,8 @@ public class ShaderUsageDemo: ModuleRules
 			"CoreUObject", 
 			"Engine", 
 			"InputCore", 
+			"Renderer",
+			"RenderCore",
 			"RHI",
             "Slate",
 			"ShaderDeclarationDemo" 
