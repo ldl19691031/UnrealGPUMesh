@@ -86,6 +86,7 @@ public:
         SHADER_PARAMETER_UAV(RWStructuredBuffer<uint>, RWVertexCounterBuffer)
         //SHADER_PARAMETER_UAV(RWTexture2D<float4>, OutputTexture)
 		SHADER_PARAMETER_UAV(RWStructuredBuffer<float3>, RWVertexPositionBuffer)
+		SHADER_PARAMETER_UAV(RWStructuredBuffer<FPackedNormal>, RWVertexTangentBuffer)
         SHADER_PARAMETER_UAV(AppendStructuredBuffer<Triangle>,OutputBufferTest)
         SHADER_PARAMETER_SAMPLER(SamplerState, myLinearClampSampler)
         SHADER_PARAMETER(FVector4, InputTextureSize)
@@ -290,7 +291,7 @@ void FGPUMeshShader::RunComputeShader_RenderThread(
 	if (SamplerState.IsValid() == false)
 	{
 		SamplerState =  RHICreateSamplerState(FSamplerStateInitializerRHI(
-			ESamplerFilter::SF_Trilinear,
+			ESamplerFilter::SF_Bilinear,
 			ESamplerAddressMode::AM_Clamp,
 			ESamplerAddressMode::AM_Clamp,
 			ESamplerAddressMode::AM_Clamp
@@ -388,7 +389,8 @@ void FGPUMeshShader::UpdateMeshBySDFGPU(FRHICommandListImmediate& RHICmdList, UV
 	}
 	RHICmdList.TransitionResource(EResourceTransitionAccess::ERWBarrier, EResourceTransitionPipeline::EGfxToCompute, VertexCounterBufferUAV);
 	RHIGetDefaultContext()->RHIClearUAVUint(VertexCounterBufferUAV,FUintVector4(0));
-	
+	RHIGetDefaultContext()->RHIClearUAVFloat( VertexBuffers->PositionVertexBuffer.UnorderedAccessViewRHI, FVector4(0,0,0,0));
+	RHIGetDefaultContext()->RHIClearUAVFloat( VertexBuffers->DynamicTangentXBuffer.UnorderedAccessViewRHI, FVector4(0,0,0,0));
 	PassParameters.RWVertexCounterBuffer = VertexCounterBufferUAV;
 	
 	FUnorderedAccessViewRHIRef SDFTextureUAV = RHICreateUnorderedAccessView(SDFTextureNew);
@@ -435,5 +437,6 @@ void FGPUMeshShader::UpdateMeshBySDFGPU(FRHICommandListImmediate& RHICmdList, UV
         );
 
 	PassParameters.RWVertexPositionBuffer = VertexBuffers->PositionVertexBuffer.UnorderedAccessViewRHI;
+	PassParameters.RWVertexTangentBuffer = VertexBuffers->DynamicTangentXBuffer.UnorderedAccessViewRHI;
 	FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader, PassParameters, GroupCounts);
 }

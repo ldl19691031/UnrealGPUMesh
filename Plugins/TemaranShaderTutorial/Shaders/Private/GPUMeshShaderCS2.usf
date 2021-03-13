@@ -1,11 +1,23 @@
 ﻿
 #include "/Engine/Public/Platform.ush"
+#include "/Engine/Private/Common.ush"
+#include "/Engine/Private/GpuSkinCommon.ush"
 #include "MarchingCube.ush"
 
 Texture3D<float4> InputTexture;
 Texture2D<uint> TriTableTexture;
 RWStructuredBuffer<int> RWVertexCounterBuffer;
 RWStructuredBuffer<float3> RWVertexPositionBuffer;
+
+struct FPackedNormal
+{
+	uint PackedTagentX;
+	uint PackedTangentZ;
+};
+
+RWStructuredBuffer<FPackedNormal> RWVertexTangentBuffer;
+
+
 AppendStructuredBuffer<Triangle> OutputBufferTest;
 float4 InputTextureSize;
 float4 InputSlice;
@@ -54,7 +66,20 @@ float3 CalculateGradient(float3 p)
         );
 }
 
-
+FPackedNormal EncodeNormal(float3 normal)
+{
+	FPackedNormal result = (FPackedNormal)0;
+	//result.PackedTagentX = float4(1,0,0,0);
+	//result.PackedTangentZ = float4(normal, 1);
+	//result.PackedTangentZ = float4(0,0,1,1);
+	//result.PackedTagentX = PackS8x3N(float3(0.1f,0.2f,0.3f) + float3(1,1,1));
+	//result.PackedTangentZ =PackS8x4N( float4(0.5f,0.6f,0.7f,0.8f) + float4(1,1,1,1));
+	normal = clamp(normal, float3(-0.85f, -0.85f, -0.85f), float3(0.85f,0.85f,0.85f));
+	result.PackedTagentX = PackS8x3N(float3(1.0f, 0.0f, 0.0f) + float3(1,1,1));
+	result.PackedTangentZ =PackS8x4N( float4(normal,1.0f) + float4(1,1,1,1));
+	
+	return result;
+}
 [numthreads(THREADGROUPSIZE_X, THREADGROUPSIZE_Y, THREADGROUPSIZE_Z)]
 void MainComputeShader(uint3 threadId : SV_DispatchThreadID)
 {
@@ -182,8 +207,9 @@ void MainComputeShader(uint3 threadId : SV_DispatchThreadID)
 			RWVertexPositionBuffer[localIndex + 1] = v2.vPosition;
 			RWVertexPositionBuffer[localIndex + 2] = v1.vPosition;
 
-			
-			
+			RWVertexTangentBuffer[localIndex] = EncodeNormal(v0.vNormal);
+			RWVertexTangentBuffer[localIndex + 1] = EncodeNormal(v2.vNormal);
+			RWVertexTangentBuffer[localIndex + 2] = EncodeNormal(v1.vNormal);
 			
 		}
 	}

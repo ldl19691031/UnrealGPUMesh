@@ -6,7 +6,7 @@
 #include "UObject/ObjectMacros.h"
 #include "Components/ActorComponent.h"
 #include "Components/MeshComponent.h"
-#include "DynamicPositionVertexBuffer.h"
+#include "GPUDynamicVertexBuffer.h"
 #include "UGPUMeshComponent.generated.h"
 
 
@@ -48,8 +48,15 @@ struct FGPUMeshVertexBuffers
 {
 	/** The buffer containing vertex data. */
 	FStaticMeshVertexBuffer StaticMeshVertexBuffer;
+
+	
 	/** The buffer containing the position vertex data. */
-	FDynamicPositionVertexBuffer PositionVertexBuffer;
+	FGPUDynamicVertexBuffer PositionVertexBuffer;
+
+	FGPUDynamicVertexBuffer DynamicTangentXBuffer;
+	
+	FGPUDynamicVertexBuffer DynamicTangentZBuffer;
+	
 	/** The buffer containing the vertex color data. */
 	FColorVertexBuffer ColorVertexBuffer;
 

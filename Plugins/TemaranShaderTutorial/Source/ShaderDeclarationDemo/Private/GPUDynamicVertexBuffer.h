@@ -7,15 +7,24 @@
 /**
  * 
  */
-class  FDynamicPositionVertexBuffer : public FVertexBufferWithSRV
+class  FGPUDynamicVertexBuffer : public FVertexBufferWithSRV
+
 {
+	
 public:
-	 FDynamicPositionVertexBuffer();
-	 ~FDynamicPositionVertexBuffer();
+	enum class EUsage
+	{
+		None,
+         PositionBuffer,
+         TangentBuffer
+    } Usage;
+	
+	 FGPUDynamicVertexBuffer();
+	 ~FGPUDynamicVertexBuffer();
 
 	 void CleanUp();
 
-	 void Init(uint32 NumVertices);
+	 void Init(uint32 NumVertices, EUsage usage = EUsage::PositionBuffer);
 
 	 uint32 GetNumVertices() const {	return NumVertices;	}
 
@@ -24,6 +33,9 @@ public:
 	 virtual void ReleaseRHI() override;
 
 	 void BindPositionVertexBuffer(const FVertexFactory* VertexFactory, FStaticMeshDataType& StaticMeshData);
-private:
-	uint32 NumVertices;	
+	 void BindTangentVertexBuffer(const FVertexFactory* VertexFactory, FStaticMeshDataType& StaticMeshData);
+ private:
+	uint32 NumVertices;
+
+	 
 };

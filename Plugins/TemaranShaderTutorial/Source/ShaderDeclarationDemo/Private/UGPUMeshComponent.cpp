@@ -39,6 +39,8 @@ public:
 	virtual ~FGPUMeshSceneProxy()
 	{
 		VertexBuffers.PositionVertexBuffer.ReleaseResource();
+		VertexBuffers.DynamicTangentXBuffer.ReleaseResource();
+		VertexBuffers.DynamicTangentZBuffer.ReleaseResource();
 		VertexBuffers.StaticMeshVertexBuffer.ReleaseResource();
 		VertexBuffers.ColorVertexBuffer.ReleaseResource();
 		IndexBuffer.ReleaseResource();
@@ -215,6 +217,8 @@ FBoxSphereBounds UUGPUMeshComponent::CalcBounds(const FTransform& LocalToWorld) 
 void FGPUMeshVertexBuffers::Init(FLocalVertexFactory* VertexFactory, uint32 NumVertics)
 {
 	PositionVertexBuffer.Init(NumVertics);
+	DynamicTangentXBuffer.Init(NumVertics, FGPUDynamicVertexBuffer::EUsage::TangentBuffer);
+	DynamicTangentZBuffer.Init(NumVertics);
 	StaticMeshVertexBuffer.SetUseFullPrecisionUVs(true);
 	StaticMeshVertexBuffer.Init(NumVertics, 2);
 	FGPUMeshVertexBuffers* Self = this;
@@ -222,12 +226,19 @@ void FGPUMeshVertexBuffers::Init(FLocalVertexFactory* VertexFactory, uint32 NumV
 		[VertexFactory, NumVertics, Self](FRHICommandListImmediate& RHICmdList)
 		{
 			InitOrUpdateResource(&Self->PositionVertexBuffer);
+			InitOrUpdateResource(&Self->DynamicTangentXBuffer);
+			//InitOrUpdateResource(&Self->DynamicTangentZBuffer);
 			InitOrUpdateResource(&Self->StaticMeshVertexBuffer);
 			check(Self->PositionVertexBuffer.IsInitialized());
 			check(Self->StaticMeshVertexBuffer.IsInitialized());
+			check(Self->DynamicTangentXBuffer.IsInitialized());
+			//check(Self->DynamicTangentZBuffer.IsInitialized());
 			FLocalVertexFactory::FDataType Data;
 			Self->PositionVertexBuffer.BindPositionVertexBuffer(VertexFactory, Data);
-			Self->StaticMeshVertexBuffer.BindTangentVertexBuffer(VertexFactory, Data);
+			
+			Self->DynamicTangentXBuffer.BindTangentVertexBuffer(VertexFactory, Data);
+			//Self->DynamicTangentZBuffer.BindTangentVertexBuffer(VertexFactory, Data);
+			//Self->StaticMeshVertexBuffer.BindTangentVertexBuffer(VertexFactory, Data);
 			Self->StaticMeshVertexBuffer.BindPackedTexCoordVertexBuffer(VertexFactory, Data);
 			Self->StaticMeshVertexBuffer.BindLightMapVertexBuffer(VertexFactory, Data, 1);
 			FColorVertexBuffer::BindDefaultColorVertexBuffer(VertexFactory, Data,
