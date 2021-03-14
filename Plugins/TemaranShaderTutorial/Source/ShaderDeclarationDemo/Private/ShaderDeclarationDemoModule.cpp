@@ -16,7 +16,7 @@
 #include "RenderTargetPool.h"
 #include "Runtime/Core/Public/Modules/ModuleManager.h"
 #include "Interfaces/IPluginManager.h"
-#include "UGPUMeshComponent.h"
+#include "GPUMeshComponent.h"
 IMPLEMENT_MODULE(FShaderDeclarationDemoModule, ShaderDeclarationDemo)
 
 // Declare some GPU stats so we can track them later
@@ -98,21 +98,23 @@ void FShaderDeclarationDemoModule::UpdateGPUMeshParameters(FGPUMeshParameters& G
 	RenderEveryFrameLock.Unlock();
 }
 
-void FShaderDeclarationDemoModule::UpdateGPUMesh(UVolumeTexture* SDFTexture, FGPUMeshVertexBuffers* VertexBuffers)
+
+void FShaderDeclarationDemoModule::UpdateGPUMesh(FTexture3DRHIRef SDFTexture, const FGPUMeshControlParams& ControlParams,
+	FGPUMeshVertexBuffers* VertexBuffers)
 {
 	UpdateMeshRequests=
-		[=]()
-		{
-			FRHICommandListImmediate& RHICmdList = GRHICommandList.GetImmediateCommandList();
+        [=]()
+        {
+        	FRHICommandListImmediate& RHICmdList = GRHICommandList.GetImmediateCommandList();
 	
-		    FGPUMeshShader::UpdateMeshBySDFGPU(
-		        RHICmdList,
-		        SDFTexture,
-		        VertexBuffers
-		    );
-		}
+        	FGPUMeshShader::UpdateMeshBySDFGPU(
+                RHICmdList,
+                SDFTexture,
+                VertexBuffers,
+                ControlParams
+            );
+        }
 	;
-	
 }
 
 FGPUMeshParameters FShaderDeclarationDemoModule::GetGPUMeshParameters()

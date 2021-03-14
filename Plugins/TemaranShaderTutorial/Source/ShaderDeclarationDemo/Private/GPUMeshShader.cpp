@@ -3,6 +3,7 @@
 #include "RHIStaticStates.h"
 #include "Shader.h"
 #include "GlobalShader.h"
+#include "GPUMeshComponent.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 #include "ShaderParameterStruct.h"
@@ -10,7 +11,7 @@
 #include "RHICommandList.h"
 #include "Engine/VolumeTexture.h"
 #include "MarchingCubeDef.h"
-#include "UGPUMeshComponent.h"
+
 
 #define NUM_THREADS_PER_GROUP_DIMENSION 8
 /**********************************************************************************************/
@@ -91,6 +92,8 @@ public:
         SHADER_PARAMETER_SAMPLER(SamplerState, myLinearClampSampler)
         SHADER_PARAMETER(FVector4, InputTextureSize)
         SHADER_PARAMETER(FVector4, InputSlice)
+		SHADER_PARAMETER(FVector,vertexOffset)
+		SHADER_PARAMETER(FVector,vertexScale)
         SHADER_PARAMETER(float,isoLevel)
         SHADER_PARAMETER(int, gridSize)
         SHADER_PARAMETER(int, vertexCounter)
@@ -153,6 +156,7 @@ public:
             SHADER_PARAMETER_SRV(StructuredBuffer<Brush>,InputBrushList)
             SHADER_PARAMETER_UAV(RWTexture3D<float4>, OutputTexture)
 			SHADER_PARAMETER(uint32, BrushCount)
+			SHADER_PARAMETER(float,Smoothness)
       END_SHADER_PARAMETER_STRUCT()
 public:
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
@@ -208,6 +212,44 @@ void FGPUMeshShader::UpdateSDFTextureByBrushGPU(FRHICommandListImmediate& RHICmd
 	);
 	FComputeShaderUtils::Dispatch(RHICmdList,SDFComputeShader, SdfShaderParameters, GroupCounts);
 }
+
+void FGPUMeshShader::InitBrushBuffer(FStructuredBufferRHIRef& BrushBuffer_Local,
+	FShaderResourceViewRHIRef& BrushBufferShaderResourceView_Local)
+{
+	FRHIResourceCreateInfo rhiCreateInfo;
+	BrushBuffer_Local = RHICreateStructuredBuffer(
+        sizeof(FGPUSDFModifyCS::Brush),
+        sizeof(FGPUSDFModifyCS::Brush) * 64,
+        BUF_ShaderResource| BUF_UnorderedAccess,
+        rhiCreateInfo
+    );
+	BrushBufferShaderResourceView_Local = RHICreateShaderResourceView(BrushBuffer_Local);
+}
+
+void FGPUMeshShader::UpdateSdfTextureByBrushGPU(FRHICommandListImmediate& RHICmdList,
+	const TArray<FGPUMeshParameters::FBrushParameter>& Brushes, FStructuredBufferRHIRef BrushBuffer_Local,
+	FShaderResourceViewRHIRef BrushBufferShaderResourceView_Local, FTexture3DRHIRef SDFTexture,
+	FUnorderedAccessViewRHIRef SDFTextureUAV,const FSDFBrushRenderControlParameter& ControlParameter)
+{
+	FGPUSDFModifyCS::FParameters SdfShaderParameters;
+	SdfShaderParameters.BrushCount = Brushes.Num();
+	SdfShaderParameters.Smoothness = ControlParameter.Smoothness;
+	void* LockedMemory = RHILockStructuredBuffer(BrushBuffer_Local,0, BrushBuffer_Local->GetSize(),EResourceLockMode::RLM_WriteOnly);
+	FMemory::Memcpy(LockedMemory,Brushes.GetData(),BrushBuffer_Local->GetSize());
+	RHIUnlockStructuredBuffer(BrushBuffer_Local);
+	SdfShaderParameters.InputBrushList = BrushBufferShaderResourceView_Local;
+	SdfShaderParameters.OutputTexture = SDFTextureUAV;
+	RHICmdList.ClearUAVFloat(SDFTextureUAV, FVector4(0,0,0,0));
+	TShaderMapRef<FGPUSDFModifyCS> SDFComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+	FIntVector GroupCounts = FIntVector(
+        SDFTexture->GetSizeX() / 8,
+        SDFTexture->GetSizeY() / 8,
+        1
+    );
+	FComputeShaderUtils::Dispatch(RHICmdList,SDFComputeShader, SdfShaderParameters, GroupCounts);
+}
+
+
 
 void FGPUMeshShader::RunComputeShader_RenderThread(
 	FRHICommandListImmediate& RHICmdList, 
@@ -347,36 +389,24 @@ void FGPUMeshShader::RunComputeShader_RenderThread(
 	RHICmdList.CopyToResolveTarget(ShaderOutputTexture, OriginalRT, FResolveParams());
 }
 
-void FGPUMeshShader::UpdateMeshBySDFGPU(FRHICommandListImmediate& RHICmdList, UVolumeTexture* SDFTexture,
-                                        FGPUMeshVertexBuffers* VertexBuffers)
+void FGPUMeshShader::UpdateMeshBySDFGPU(
+	FRHICommandListImmediate& RHICmdList,
+	FTexture3DRHIRef SDFTexture,
+	FGPUMeshVertexBuffers* VertexBuffers,
+	const FGPUMeshControlParams& ControlParams
+	)
 {
 	QUICK_SCOPE_CYCLE_COUNTER(STAT_ShaderPlugin_GPUMeshComputeShaderUpdate); // Used to gather CPU profiling data for the UE4 session frontend
 	SCOPED_DRAW_EVENT(RHICmdList, ShaderPlugin_GPUMeshComputeShaderUpdate); // Used to profile GPU activity and add metadata to be consumed by for example RenderDoc
 	
-	if (SDFTexture == nullptr || VertexBuffers == nullptr)
+	if (SDFTexture.IsValid() == false || VertexBuffers == nullptr)
 	{
 		return;
 	}
 	FGPUMeshShaderCS2::FParameters PassParameters;
-	FRHIResourceCreateInfo CreateInfo;
-	FTexture3DRHIRef SDFTextureNew = RHICreateTexture3D(
-    SDFTexture->GetSizeX(),
-    SDFTexture->GetSizeY(),
-    SDFTexture->GetSizeZ(),
-    PF_B8G8R8A8,
-    1,
-    TexCreate_ShaderResource | TexCreate_UAV,
-    CreateInfo
-    );
-	FRHICopyTextureInfo copyInfo;
-	{
-		copyInfo.NumMips = 0;
-		copyInfo.SourceMipIndex = 0;
-		copyInfo.DestMipIndex = 0;
-		copyInfo.NumSlices = SDFTexture->GetSizeZ();
-	}
-	RHICmdList.CopyTexture(SDFTexture->Resource->TextureRHI, SDFTextureNew, copyInfo);
-	PassParameters.InputTexture = SDFTextureNew;
+	PassParameters.vertexOffset = ControlParams.Offset;
+	PassParameters.vertexScale = ControlParams.Scale;
+	PassParameters.InputTexture = SDFTexture;
 	if (VertexCounterBuffer.IsValid() == false)
 	{
 		FRHIResourceCreateInfo rhiCreateInfo;
@@ -392,8 +422,6 @@ void FGPUMeshShader::UpdateMeshBySDFGPU(FRHICommandListImmediate& RHICmdList, UV
 	RHIGetDefaultContext()->RHIClearUAVFloat( VertexBuffers->PositionVertexBuffer.UnorderedAccessViewRHI, FVector4(0,0,0,0));
 	RHIGetDefaultContext()->RHIClearUAVFloat( VertexBuffers->DynamicTangentXBuffer.UnorderedAccessViewRHI, FVector4(0,0,0,0));
 	PassParameters.RWVertexCounterBuffer = VertexCounterBufferUAV;
-	
-	FUnorderedAccessViewRHIRef SDFTextureUAV = RHICreateUnorderedAccessView(SDFTextureNew);
 
 	PassParameters.InputTextureSize = FVector4(SDFTexture->GetSizeX(), SDFTexture->GetSizeY(), SDFTexture->GetSizeZ(), 0);
 	//PassParameters.InputSlice = FVector4(ShaderOutputTexture->GetSizeX() / SDFTexture->GetSizeX(), ShaderOutputTexture->GetSizeY() / SDFTexture->GetSizeY(), 0, 0);

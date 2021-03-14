@@ -67,6 +67,11 @@ struct FGPUMeshParameters
 private:
 	FIntPoint CachedRenderTargetSize;
 };
+struct FGPUMeshControlParams
+{
+	FVector Offset;
+	FVector Scale;
+};
 /*
  * Since we already have a module interface due to us being in a plugin, it's pretty handy to just use it
  * to interact with the renderer. It gives us the added advantage of being able to decouple any render
@@ -121,10 +126,11 @@ public:
 	void UpdateParameters(FShaderUsageExampleParameters& DrawParameters);
 
 	void UpdateGPUMeshParameters(FGPUMeshParameters& GPUMeshParameters);
-
+	
 	void UpdateGPUMesh(
 		/* In */
-		class UVolumeTexture* SDFTexture,
+		FTexture3DRHIRef SDFTexture,
+		const FGPUMeshControlParams& ControlParams,
 		/* Out*/
 		struct FGPUMeshVertexBuffers* VertexBuffers
 	);

@@ -8,7 +8,7 @@ struct Brush
 StructuredBuffer<Brush> InputBrushList;
 RWTexture3D<float4> OutputTexture;
 uint BrushCount;
-
+float Smoothness;
 [numthreads(8, 8, 1)]
 void MainComputeShader(uint3 threadId : SV_DispatchThreadID)
 {
@@ -30,16 +30,29 @@ void MainComputeShader(uint3 threadId : SV_DispatchThreadID)
 	for (int i = 0; i < depth; i++)
 	{
 		uint z = i;
-		float3 gridPos = float3(x,y,z) * 100.0f;
+		float3 gridPos = float3(x,y,z);
+		float sdfValue = 0.0f;
 		for (int j =0; j < BrushCount; j++)
 		{
 			Brush brush = InputBrushList[j];
 			float distToBrushCenter = length(brush.position - gridPos);
 			if (distToBrushCenter < brush.radius)
 			{
-				OutputTexture[uint3(x,y,z)] = float4(1,1,1,1);
+				sdfValue += 1.0f;
 			}
-			
+			else
+			{
+				float offset = distToBrushCenter - brush.radius;
+				float addvalue = clamp(pow(1.0f /offset , Smoothness), 0.0f, 1.1f);
+				sdfValue += addvalue;
+			}
+		}
+		if (sdfValue > 1.0f)
+		{
+			OutputTexture[uint3(x,y,z)] = float4(1,1,1,1);
+		}else
+		{
+			OutputTexture[uint3(x,y,z)] = float4(0,0,0,0);
 		}
 	}
 	

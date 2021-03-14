@@ -25,6 +25,9 @@ float4 InputSlice;
 float isoLevel;
 int gridSize;
 groupshared int vertexCounter;
+float3 vertexOffset;
+float3 vertexScale;
+
 SamplerState myLinearClampSampler;
 
 float SampleData(int3 pos) {
@@ -203,9 +206,9 @@ void MainComputeShader(uint3 threadId : SV_DispatchThreadID)
 			t.v[1] = v2;
 			t.v[2] = v1;
 			
-			RWVertexPositionBuffer[localIndex] = v0.vPosition;
-			RWVertexPositionBuffer[localIndex + 1] = v2.vPosition;
-			RWVertexPositionBuffer[localIndex + 2] = v1.vPosition;
+			RWVertexPositionBuffer[localIndex] = v0.vPosition + vertexOffset;
+			RWVertexPositionBuffer[localIndex + 1] = v2.vPosition + vertexOffset;
+			RWVertexPositionBuffer[localIndex + 2] = v1.vPosition + vertexOffset;
 
 			RWVertexTangentBuffer[localIndex] = EncodeNormal(v0.vNormal);
 			RWVertexTangentBuffer[localIndex + 1] = EncodeNormal(v2.vNormal);
