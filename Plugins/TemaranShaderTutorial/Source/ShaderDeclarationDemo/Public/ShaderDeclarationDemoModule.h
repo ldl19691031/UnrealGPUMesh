@@ -135,6 +135,8 @@ public:
 		struct FGPUMeshVertexBuffers* VertexBuffers
 	);
 	FGPUMeshParameters GetGPUMeshParameters();
+
+	void RequestTickMPMFluid();
 private:
 	TRefCountPtr<IPooledRenderTarget> ComputeShaderOutput;
 	TRefCountPtr<IPooledRenderTarget> SDFRenderTarget;
@@ -145,7 +147,7 @@ private:
 	FCriticalSection RenderEveryFrameLock;
 	std::function<void(void)> UpdateMeshRequests;
 	volatile bool bCachedParametersValid;
-
+	bool ShouldTickMPMFluid = false;
 	void PostResolveSceneColor_RenderThread(FRHICommandListImmediate& RHICmdList, class FSceneRenderTargets& SceneContext);
 	void Draw_RenderThread(
 		const FShaderUsageExampleParameters& DrawParameters,

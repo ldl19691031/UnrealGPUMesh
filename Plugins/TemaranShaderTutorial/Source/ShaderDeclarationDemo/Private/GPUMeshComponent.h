@@ -7,6 +7,8 @@
 #include "Components/ActorComponent.h"
 #include "Components/MeshComponent.h"
 #include "GPUDynamicVertexBuffer.h"
+#include "Engine/VolumeTexture.h"
+
 #include "GPUMeshComponent.generated.h"
 
 
@@ -54,6 +56,11 @@ public:
 	virtual int32 GetNumMaterials() const override { return 1; }
 
 	virtual FBoxSphereBounds CalcBounds(const FTransform& LocalToWorld) const override;
+
+	UINT GetTextureSize() { return SDFTexture ? SDFTexture->GetSizeX() : 0; }
+	FUnorderedAccessViewRHIRef SDFTextureUAV;
+
+	
 };
 struct FGPUMeshVertexBuffers
 {

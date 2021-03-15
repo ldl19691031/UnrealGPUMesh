@@ -17,6 +17,7 @@
 #include "Runtime/Core/Public/Modules/ModuleManager.h"
 #include "Interfaces/IPluginManager.h"
 #include "GPUMeshComponent.h"
+#include "MLSMPMManager.h"
 IMPLEMENT_MODULE(FShaderDeclarationDemoModule, ShaderDeclarationDemo)
 
 // Declare some GPU stats so we can track them later
@@ -100,26 +101,31 @@ void FShaderDeclarationDemoModule::UpdateGPUMeshParameters(FGPUMeshParameters& G
 
 
 void FShaderDeclarationDemoModule::UpdateGPUMesh(FTexture3DRHIRef SDFTexture, const FGPUMeshControlParams& ControlParams,
-	FGPUMeshVertexBuffers* VertexBuffers)
+                                                 FGPUMeshVertexBuffers* VertexBuffers)
 {
 	UpdateMeshRequests=
-        [=]()
-        {
-        	FRHICommandListImmediate& RHICmdList = GRHICommandList.GetImmediateCommandList();
+		[=]()
+		{
+			FRHICommandListImmediate& RHICmdList = GRHICommandList.GetImmediateCommandList();
 	
-        	FGPUMeshShader::UpdateMeshBySDFGPU(
-                RHICmdList,
-                SDFTexture,
-                VertexBuffers,
-                ControlParams
-            );
-        }
-	;
+			FGPUMeshShader::UpdateMeshBySDFGPU(
+				RHICmdList,
+				SDFTexture,
+				VertexBuffers,
+				ControlParams
+			);
+		}
+		;
 }
 
 FGPUMeshParameters FShaderDeclarationDemoModule::GetGPUMeshParameters()
 {
 	return CachedGPUMeshParameters;
+}
+
+void FShaderDeclarationDemoModule::RequestTickMPMFluid()
+{
+	ShouldTickMPMFluid = true;
 }
 
 void FShaderDeclarationDemoModule::PostResolveSceneColor_RenderThread(FRHICommandListImmediate& RHICmdList, class FSceneRenderTargets& SceneContext)
@@ -177,6 +183,11 @@ void FShaderDeclarationDemoModule::Draw_RenderThread(
 	FComputeShaderExample::RunComputeShader_RenderThread(RHICmdList, DrawParameters, ComputeShaderOutput->GetRenderTargetItem().UAV);
 	FPixelShaderExample::DrawToRenderTarget_RenderThread(RHICmdList, DrawParameters, ComputeShaderOutput->GetRenderTargetItem().TargetableTexture);
 	FGPUMeshShader::RunComputeShader_RenderThread(RHICmdList, GPUMeshDrawParameters, SDFRenderTarget->GetRenderTargetItem().UAV, GPUMeshShaderOutput->GetRenderTargetItem().UAV);
+	if (ShouldTickMPMFluid)
+	{
+		FMLSMPMManager::Update_RenderThread(RHICmdList);
+		ShouldTickMPMFluid = false;
+	}
 	
 	UpdateMeshRequests();
 }

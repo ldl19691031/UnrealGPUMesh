@@ -68,6 +68,8 @@ public:
 	                }
 	                RHICmdList.CopyTexture(SDFTextureVolume->Resource->TextureRHI, Self->SDFTexture, copyInfo);
 	                Self->SDFTextureUAV = RHICreateUnorderedAccessView(Self->SDFTexture);
+	            	Self->OwnerComponent->SDFTextureUAV = Self->SDFTextureUAV;
+	            	
 	            }
 	        );
 		}

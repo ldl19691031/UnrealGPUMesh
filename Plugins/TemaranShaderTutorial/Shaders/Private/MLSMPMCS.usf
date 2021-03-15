@@ -1,0 +1,257 @@
+﻿#include "/Engine/Public/Platform.ush"
+#include "MPMPublic.ush"
+uint max_particles;
+
+uint n_grid;
+float dx;
+float inv_dx;
+float dt;
+float E;
+uint bound;
+
+float p_rho;
+float p_vol;
+float p_mass;
+float gravity;
+
+uint n_particles;
+
+
+
+RWStructuredBuffer<FParticleData> particleDataBuffer;
+
+RWTexture3D<float4> grid;
+
+RWTexture3D<uint> grid_X;
+RWTexture3D<uint> grid_Y;
+RWTexture3D<uint> grid_Z;
+RWTexture3D<uint> grid_W;
+
+//RWTexture3D<uint> grid_atomic;
+RWStructuredBuffer<uint> grid_atomic;
+//RWTexture3D<uint4> grid;
+static float3x3 identity = {
+	1.0f, 0.0f, 0.0f,
+	0.0f, 1.0f, 0.0f,
+	0.0f, 0.0f, 1.0f
+};
+
+// from https://www.gamedev.net/forums/topic/613648-dx11-interlockedadd-on-floats-in-pixel-shader-workaround/
+void InterlockedAddFloat(RWTexture3D<uint> data, uint3 addr, float value ) // Works perfectly! <- original comment, I won't remove because it inspires confidence
+{
+	uint i_val = asuint(value);
+	uint tmp0 = 0;
+	uint tmp1;
+	[allow_uav_condition] while (true)
+	{
+		InterlockedCompareExchange( data[addr], tmp0, i_val, tmp1);
+		if (tmp1 == tmp0)
+			break;
+		tmp0 = tmp1;
+		i_val = asuint(value + asfloat(tmp1));
+	}
+}
+
+void GetDataFromGrid(uint3 addr, out float3 grid_v, out float grid_m)
+{
+	float4 data;
+	data.x = asfloat(grid_X[addr]);
+	data.y = asfloat(grid_Y[addr]);
+	data.z = asfloat(grid_Z[addr]);
+	data.w = asfloat(grid_W[addr]);
+	grid_v = data.xyz;
+	grid_m = data.w;
+}
+
+void SetDataToGrid(uint3 addr, float3 grid_v, float grid_m)
+{
+	
+	grid_X[addr] = asuint(grid_v.x);
+	grid_Y[addr] = asuint(grid_v.y);
+	grid_Z[addr] = asuint(grid_v.z);
+	grid_W[addr] = asuint(grid_m);
+}
+
+bool IsDataValid(uint3 addr)
+{
+	return grid_W[addr] == 0;
+}
+
+float3x3 OuterProduct(float3 a, float3 b)
+{
+	float3x3 result = float3x3
+	(
+		a[0] * b[0], a[0] * b[1], a[0] * b[2],
+		a[1] * b[0], a[1] * b[1], a[1] * b[2],
+		a[2] * b[0], a[2] * b[1], a[2] * b[2]
+	);
+	return result;
+}
+[numthreads(8, 1, 1)]
+void P2G(uint3 threadId : SV_DispatchThreadID)
+{
+	uint p = threadId.x;
+	if (p >= n_particles)
+	{
+		return;
+	}
+	FParticleData particleData = particleDataBuffer[p];
+	int3 base = (int3)(particleData.x / dx  - 0.5f);
+
+	float3 fx = particleData.x / dx - float3(base.x,base.y,base.z);
+
+	float3 w[3];
+	w[0]= 0.5f * (1.5f - fx) * (1.5f - fx);
+	w[1] = 0.75f - (fx - 1.0f) * (fx - 1.0f);
+	w[2] = 0.5f * (fx - 0.5f) * (fx - 0.5f);
+
+	float stress = -dt * p_vol * (particleData.J - 1.0f) * 4 * inv_dx * inv_dx * E;
+
+	float3x3 affine = identity * stress + p_mass * (float3x3)particleData.C;
+
+	for(int i = 0; i< 3; i++)
+	//int i = 0;
+	{
+		for(int j = 0; j < 3; j++)
+		//int j = 0;
+		{
+			for(int k = 0; k < 3; k++)
+			//int k = 0;
+			{
+				uint3 offset = uint3(i,j,k);
+				float3 dpos = (float3(i,j,k) - fx) * dx;
+				float weight = w[i].x * w[j].y * w[k].z;
+				float4 grid_out;
+				grid_out.xyz = weight * (p_mass * particleData.v + mul(affine , dpos));
+				grid_out.w  = weight * p_mass;
+				int3 possibleAddr = base + offset;
+				if (possibleAddr.x < 0 || possibleAddr.y < 0 || possibleAddr.z < 0 || possibleAddr.x >= n_grid || possibleAddr.y >= n_grid || possibleAddr.z >= n_grid)
+				{
+					continue;
+				}
+				uint3 addr = (uint3)base + offset;
+				{
+					InterlockedAddFloat(grid_X,(uint3)addr, grid_out.x);
+					InterlockedAddFloat(grid_Y,(uint3)addr, grid_out.y);
+					InterlockedAddFloat(grid_Z,(uint3)addr, grid_out.z);
+					InterlockedAddFloat(grid_W,(uint3)addr, grid_out.w);
+				}
+			}
+		}
+	}
+}
+
+[numthreads(4,4,4)]
+void GridMain(uint3 threadId : SV_DispatchThreadID)
+{
+	if (threadId.x >= n_grid || threadId.y >= n_grid || threadId.z >= n_grid)
+	{
+		return;
+	}
+	uint3 addr = threadId;
+	float3 grid_v;
+	float grid_m;
+	
+	GetDataFromGrid(threadId, grid_v, grid_m);
+	float3 out_grid_v = grid_v;
+	if (grid_m > 0.0f)
+	{
+		float inv_m = 1.0f / grid_m;
+		out_grid_v = grid_v * inv_m;
+
+		out_grid_v.z += - gravity * dt;
+
+		if (threadId.x < bound && out_grid_v.x < 0)
+		{
+			out_grid_v.x = 0.0f;
+		}
+		if (threadId.x > n_grid - bound && out_grid_v.x > 0)
+		{
+			out_grid_v.x = 0.0f;
+		}
+		
+		if (threadId.y < bound && out_grid_v.y < 0)
+		{
+			out_grid_v.y = 0.0f;
+		}
+		if (threadId.y > n_grid - bound && out_grid_v.y > 0)
+		{
+			out_grid_v.y = 0.0f;
+		}
+		
+		if (threadId.z < bound && out_grid_v.z < 0)
+		{
+			out_grid_v.z = 0.0f;
+		}
+		if (threadId.z > n_grid - bound && out_grid_v.z > 0)
+		{
+			out_grid_v.z = 0.0f;
+		}
+		SetDataToGrid(addr, out_grid_v, grid_m);
+	}
+}
+
+[numthreads(8,1,1)]
+void G2P(uint3 threadId : SV_DispatchThreadID)
+{
+	uint p = threadId.x;
+	if (p >= n_particles)
+	{
+		return;
+	}
+	FParticleData particleData = particleDataBuffer[p];
+	FParticleData NewParticleData = particleData;
+	int3 base = (int3)(particleData.x / dx  - 0.5f);
+
+	float3 fx = particleData.x / dx - float3(base.x,base.y,base.z);
+
+	float3 w[3];
+	w[0]= 0.5f * (1.5f - fx) * (1.5f - fx);
+	w[1] = 0.75f - (fx - 1.0f) * (fx - 1.0f);
+	w[2] = 0.5f * (fx - 0.5f) * (fx - 0.5f);
+
+	float3 new_v = float3(0,0,0);
+	float3x3 new_c = float3x3(0,0,0,0,0,0,0,0,0);
+
+	for(int i = 0; i< 3; i++)
+		for(int j = 0; j < 3; j++)
+			for(int k = 0; k < 3; k++)
+			{
+				uint3 offset = uint3(i,j,k);
+				float3 dpos = (float3(i,j,k) - fx) * dx;
+				float weight = w[i].x * w[j].y * w[k].z;
+				int3 possibleAddr = base + offset;
+				if (possibleAddr.x < 0 || possibleAddr.y < 0 || possibleAddr.z < 0 || possibleAddr.x >= n_grid || possibleAddr.y >= n_grid || possibleAddr.z >= n_grid)
+				{
+					continue;
+				}
+				uint3 addr = (uint3)base + offset;
+				float3 grid_v;
+				float grid_m;
+				GetDataFromGrid(addr, grid_v, grid_m);
+				new_v += weight * grid_v;
+				new_c += 4 * weight  * inv_dx * inv_dx * OuterProduct(grid_v, dpos);
+			}
+	if(any(isnan(new_v)) ||any( isinf(new_v)))
+	{
+		NewParticleData.v = float3(0.001f,0.001f,0.001f);
+	}else
+	{
+		NewParticleData.v = clamp(new_v, -100.f, 100.f);
+	}
+	float3 offset = dt * NewParticleData.v;
+	if (any(isnan(offset)) == false)
+	{
+		NewParticleData.x += offset;
+	}
+	
+	NewParticleData.J *= 1 + dt * (new_c[0][0] + new_c[1][1] + new_c[2][2]);
+	NewParticleData.J = clamp(NewParticleData.J, 0.0f, 10.0f);
+	NewParticleData.C = float4x4(
+		new_c[0][0],new_c[0][1],new_c[0][2],0.0f,
+		new_c[1][0],new_c[1][1],new_c[1][2],0.0f,
+		new_c[2][0],new_c[2][1],new_c[2][2],0.0f,
+		0.0f, 0.0f,0.0f,1.0f
+	);
+	particleDataBuffer[p] = NewParticleData;
+}

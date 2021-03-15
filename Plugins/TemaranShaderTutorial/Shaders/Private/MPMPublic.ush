@@ -1,0 +1,9 @@
+﻿struct FParticleData
+{
+	float3 x;
+	float3 v;
+	float J;
+	float pad;
+	float4x4 C;
+	
+};
