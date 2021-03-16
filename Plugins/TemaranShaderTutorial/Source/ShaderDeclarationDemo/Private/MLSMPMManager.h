@@ -16,19 +16,20 @@ struct FMLSMPMData : TSharedFromThis<FMLSMPMData>
 		float pad;
 		FMatrix C;
 	};
-	uint32 MaxParticles = 40960;
-	const uint32 N_Grid = 32;
+	uint32 MaxParticles = 81920;
+	const uint32 N_Grid = 64;
 	const float dx = 1.0f / N_Grid;
 	const float inv_dx = 1.0f / dx;
-	const float dt = 2e-4f;
-	const float E = 400;
-	const uint32 bound = 5;
+	const float dt = 4e-4f;
 
+	const float E = 500;
+	const uint32 bound = 5;
+	float gameThreadTickTime;
 	float p_rho = 1.0f;
 	const float p_vol = (dx * 0.5f) *(dx * 0.5f) *(dx * 0.5f) ;
 	const float p_mass = p_vol * p_rho;
 	const float gravity = 9.8f;
-
+	
 	FStructuredBufferRHIRef n_particles_buffer;
 	FUnorderedAccessViewRHIRef n_particles_buffer_uav;
 
@@ -51,6 +52,9 @@ struct FMLSMPMData : TSharedFromThis<FMLSMPMData>
 	FUnorderedAccessViewRHIRef grid_texture_atomic_uav;
 
 	UGPUMeshComponent* visualizer;
+
+	FTexture3DRHIRef sdf_temp_texture;
+	FUnorderedAccessViewRHIRef sdf_temp_texture_uav;
 	
 	uint32 particle_num = 0;
 	FMLSMPMData()
@@ -67,6 +71,7 @@ struct FMLSMPMData : TSharedFromThis<FMLSMPMData>
 
 	void Substep(FRHICommandList& RHICmdList);
 
+	void Visualize(FRHICommandList& RHICmdList);
 	void AddParticle(uint32 num);
 private:
 	void InitializeTexture(FTexture3DRHIRef& RefCount, FUnorderedAccessViewRHIRef& RefCountPtr);

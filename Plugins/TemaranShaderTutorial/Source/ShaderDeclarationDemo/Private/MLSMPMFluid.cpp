@@ -41,11 +41,13 @@ void UMLSMPMFluid::TickComponent(float DeltaTime, ELevelTick TickType, FActorCom
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 	DeltaTimeCounter += DeltaTime;
-	if (DeltaTimeCounter >= 1.0f)
-	{
-		FluidData->AddParticle(ParticlePerSecond);
-		DeltaTimeCounter = 0.0f;
-	}
+	FluidData->AddParticle((uint32)(ParticlePerSecond * DeltaTime));
+	// if (DeltaTimeCounter >= 1.0f)
+	// {
+	// 	FluidData->AddParticle(ParticlePerSecond);
+	// 	DeltaTimeCounter = 0.0f;
+	// }
+	FluidData->gameThreadTickTime = DeltaTime;
 	FluidData->visualizer = this->Visualizer;
 	FShaderDeclarationDemoModule::Get().RequestTickMPMFluid();
 }

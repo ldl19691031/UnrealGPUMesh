@@ -101,17 +101,19 @@ public:
 };
 IMPLEMENT_GLOBAL_SHADER(FMLSMPMShaderG2P, "/TutorialShaders/Private/MLSMPMCS.usf", "G2P", SF_Compute);
 
+#define MPMPARTICLETOTEXTUERPARAMETER  BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )\
+			SHADER_PARAMETER(UINT, n_particles)\
+			SHADER_PARAMETER(UINT, texture_size)\
+			SHADER_PARAMETER_UAV(RWStructuredBuffer<FParticleData>, particleDataBuffer)\
+			SHADER_PARAMETER_UAV(RWTexture3D<uint>, SDFTempTexture)\
+			SHADER_PARAMETER_UAV(RWTexture3D<float4>,OutputTexture)\
+		END_SHADER_PARAMETER_STRUCT()
 class FMPMToSDFTextureShader : public FGlobalShader
 {
 public:
 	DECLARE_GLOBAL_SHADER(FMPMToSDFTextureShader);
-		SHADER_USE_PARAMETER_STRUCT(FMPMToSDFTextureShader, FGlobalShader);
-		BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
-		SHADER_PARAMETER(UINT, n_particles)
-		SHADER_PARAMETER(UINT, texture_size)
-		SHADER_PARAMETER_UAV(RWStructuredBuffer<FParticleData>, particleDataBuffer)
-		SHADER_PARAMETER_UAV(RWTexture3D<float4>,OutputTexture)
-	END_SHADER_PARAMETER_STRUCT()
+	SHADER_USE_PARAMETER_STRUCT(FMPMToSDFTextureShader, FGlobalShader);
+	MPMPARTICLETOTEXTUERPARAMETER
 public:
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
 	{
@@ -119,6 +121,36 @@ public:
 	}
 };
 IMPLEMENT_GLOBAL_SHADER(FMPMToSDFTextureShader, "/TutorialShaders/Private/MPMParticleToSDFTexture.usf", "Main", SF_Compute);
+
+class FScatterParticleToTempBufferShader : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FScatterParticleToTempBufferShader);
+	SHADER_USE_PARAMETER_STRUCT(FScatterParticleToTempBufferShader, FGlobalShader);
+	MPMPARTICLETOTEXTUERPARAMETER
+public:
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+};
+IMPLEMENT_GLOBAL_SHADER(FScatterParticleToTempBufferShader, "/TutorialShaders/Private/MPMParticleToSDFTexture.usf", "ScatterParticleToTempTexture", SF_Compute);
+
+class FTempBufferToOutputTextureShader : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FTempBufferToOutputTextureShader);
+	SHADER_USE_PARAMETER_STRUCT(FTempBufferToOutputTextureShader, FGlobalShader);
+	MPMPARTICLETOTEXTUERPARAMETER
+public:
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+};
+IMPLEMENT_GLOBAL_SHADER(FTempBufferToOutputTextureShader, "/TutorialShaders/Private/MPMParticleToSDFTexture.usf", "UpdateOutputTexture", SF_Compute);
+
+
 void FMLSMPMData::Init()
 {
 	FMLSMPMData* Self = this;
@@ -130,7 +162,7 @@ void FMLSMPMData::Init()
 		}
 	);
 	FMLSMPMManager::RegisterData(SharedThis(this));
-	particle_num = 10;
+	//particle_num = 10;
 }
 
 void FMLSMPMData::Init_RenderThread(FRHICommandList& RHICmdList)
@@ -156,12 +188,28 @@ void FMLSMPMData::Init_RenderThread(FRHICommandList& RHICmdList)
 		TArray<FParticleData> InitialData;
 		const FParticleData initialData = FParticleData{
 			FVector(0.75f, 0.5f, 0.75f),
-			FVector(0.0f, 0.0f, 0.0f),
+			FVector(0.0f, -1.0f, -3.0f),
 			1.0f,
 			0.0f,
 			FMatrix(EForceInit::ForceInitToZero)
 		};
-		for (UINT i = 0; i < MaxParticles; i ++)
+		UINT initialNum = 0;
+		for (UINT i = 10; i < N_Grid - 10; i += 2 )
+		{
+			for (UINT j = 10; j < N_Grid - 10; j+= 2)
+			{
+				for (UINT k = 35; k < 40; k+= 2)
+				{
+					FParticleData instance = initialData;
+					instance.x = FVector(i,j,k) / (float)N_Grid;
+					instance.v = FVector::ZeroVector;
+					InitialData.Add(instance);
+					initialNum ++;
+				}
+			}
+		}
+		this->particle_num = initialNum;
+		for (UINT i = initialNum; i < MaxParticles; i ++)
 		{
 			FParticleData instance = initialData;
 			instance.x += FMath::VRand() * 0.05f;
@@ -203,20 +251,26 @@ void FMLSMPMData::Init_RenderThread(FRHICommandList& RHICmdList)
 			BUF_ShaderResource | BUF_UnorderedAccess,
 			CreateInfo
 		);
-		// grid_texture_atomic = RHICreateTexture3D(
-  //           N_Grid,
-  //           N_Grid,
-  //           N_Grid,
-  //           PF_R32_UINT,
-  //           1,
-  //           TexCreate_ShaderResource|TexCreate_UAV,
-  //           CreateInfo
-  //       );
+
 		grid_texture_atomic_uav = RHICreateUnorderedAccessView(
 			grid_texture_atomic, false, false
         );
 	}
-	
+	if (sdf_temp_texture.IsValid() == false && visualizer != nullptr)
+	{
+		FRHIResourceCreateInfo CreateInfo;
+		uint32 size = visualizer->GetTextureSize();
+		sdf_temp_texture =  RHICreateTexture3D(
+            size,
+            size,
+            size,
+            PF_R32_UINT,
+            1,
+            TexCreate_ShaderResource|TexCreate_UAV,
+            CreateInfo
+        );
+		sdf_temp_texture_uav = RHICreateUnorderedAccessView(sdf_temp_texture);
+	}
 }
 void FMLSMPMData::InitializeTexture(FTexture3DRHIRef& InOut_grid_texture, FUnorderedAccessViewRHIRef& InOut_grid_texture_uav)
 {
@@ -255,6 +309,8 @@ void FMLSMPMData::Release()
 	grid_textureY_uav.SafeRelease();
 	grid_textureZ_uav.SafeRelease();
 	grid_textureW_uav.SafeRelease();
+	sdf_temp_texture.SafeRelease();
+	sdf_temp_texture_uav.SafeRelease();
 	FMLSMPMManager::UnregisterData(SharedThis(this));
 	
 }
@@ -300,18 +356,50 @@ void FMLSMPMData::Substep(FRHICommandList& RHICmdList)
 		int DispatchNum = particle_num / 8 + 1;
 		FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader, G2PParameters, FIntVector(DispatchNum, 1, 1));
 	}
+	
+}
+
+
+
+void FMLSMPMData::Visualize(FRHICommandList& RHICmdList)
+{
 	if (visualizer != nullptr && visualizer->SDFTextureUAV.IsValid())
 	{
 		RHICmdList.ClearUAVFloat(visualizer->SDFTextureUAV, FVector4(0,0,0,0));
-		FMPMToSDFTextureShader::FParameters PassParameters;
-		PassParameters.n_particles = this->particle_num;
-		PassParameters.texture_size = visualizer->GetTextureSize();
-		PassParameters.particleDataBuffer = particles_buffer_uav;
-		PassParameters.OutputTexture = visualizer->SDFTextureUAV;
-		TShaderMapRef<FMPMToSDFTextureShader> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
-		int DispatchNum = particle_num / 8 + 1;
-		FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader, PassParameters, FIntVector(DispatchNum, 1, 1));
-	
+		RHICmdList.ClearUAVUint(sdf_temp_texture_uav, FUintVector4(0,0,0,0));
+		{
+			//Scatter Pass
+			FScatterParticleToTempBufferShader::FParameters ScatterPassParams;
+			ScatterPassParams.n_particles = this->particle_num;
+			ScatterPassParams.texture_size = visualizer->GetTextureSize();
+			ScatterPassParams.particleDataBuffer = particles_buffer_uav;
+			ScatterPassParams.SDFTempTexture = sdf_temp_texture_uav;
+			TShaderMapRef<FScatterParticleToTempBufferShader> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+			int DispatchNum = particle_num / 8 + 1;
+			FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader, ScatterPassParams, FIntVector(DispatchNum, 1, 1));
+		}
+		{
+			//Output Update Pass
+			FTempBufferToOutputTextureShader::FParameters OutputUpdatePassParams;
+			OutputUpdatePassParams.n_particles = this->particle_num;
+			OutputUpdatePassParams.texture_size = visualizer->GetTextureSize();
+			OutputUpdatePassParams.particleDataBuffer = particles_buffer_uav;
+			OutputUpdatePassParams.SDFTempTexture = sdf_temp_texture_uav;
+			OutputUpdatePassParams.OutputTexture = visualizer->SDFTextureUAV;
+			TShaderMapRef<FTempBufferToOutputTextureShader> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+			FIntVector DispatchNum = FIntVector(
+				OutputUpdatePassParams.texture_size / 4 + 1
+			);
+			FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader, OutputUpdatePassParams, DispatchNum);
+		}
+	// 	FMPMToSDFTextureShader::FParameters PassParameters;
+	// 	PassParameters.n_particles = this->particle_num;
+	// 	PassParameters.texture_size = visualizer->GetTextureSize();
+	// 	PassParameters.particleDataBuffer = particles_buffer_uav;
+	// 	PassParameters.OutputTexture = visualizer->SDFTextureUAV;
+	// 	TShaderMapRef<FMPMToSDFTextureShader> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+	// 	int DispatchNum = particle_num / 8 + 1;
+	// 	FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader, PassParameters, FIntVector(DispatchNum, 1, 1));
 	}
 }
 void FMLSMPMData::AddParticle(uint32 num)
@@ -335,13 +423,15 @@ void FMLSMPMManager::Update_RenderThread(FRHICommandList& RHICmdList)
 	QUICK_SCOPE_CYCLE_COUNTER(STAT_ShaderPlugin_MPLMPMUpdate); // Used to gather CPU profiling data for the UE4 session frontend
 	SCOPED_DRAW_EVENT(RHICmdList, ShaderPlugin_MPLMPMUpdate);
 	check(IsInRenderingThread());
+	
 	for (auto data : MLSMPMDatas)
 	{
-		for (int i = 0; i < 5; i++)
+		int SubStepCount = data->gameThreadTickTime / data->dt;
+		for (int i = 0; i < 12; i++)
 		{
 			data->Substep(RHICmdList);
 		}
-		
+		data->Visualize(RHICmdList);
 	}
 }
 

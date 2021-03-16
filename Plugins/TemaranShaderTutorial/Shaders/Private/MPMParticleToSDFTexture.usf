@@ -2,13 +2,93 @@
 #include "MPMPublic.ush"
 
 RWStructuredBuffer<FParticleData> particleDataBuffer;
+RWTexture3D<uint> SDFTempTexture;
 RWTexture3D<float4> OutputTexture;
 
 uint n_particles;
 uint texture_size;
 
+void EncodeFloatWeightIntoUint(float weight, uint3 addr)
+{
+	uint value = (uint)(weight * 100.0f);
+	SDFTempTexture[addr] = value;
+}
 
+void AddFloatWeightIntoUint(float weight, uint3 addr)
+{
+	uint value = (uint)(weight * 100.0f);
+	uint dummy;
+	InterlockedAdd(SDFTempTexture[addr], value, dummy);
+}
+float LoadFloatWeightFromTemp(uint3 addr)
+{
+	return ((float)SDFTempTexture[addr]) / 100.0f;
+}
+[numthreads(8, 1, 1)]
+void ScatterParticleToTempTexture(uint3 threadId : SV_DispatchThreadID)
+{
+	uint p = threadId.x;
+	if (p >= n_particles)
+	{
+		return;
+	}
+	FParticleData particleData = particleDataBuffer[p];
+	float3 pos = particleData.x * (float)texture_size;
+	uint3 output_pos = (uint3)pos;
+	int sdfSize = 0 ;
+    
+	
+	if (pos.x < 0 || pos.x >=texture_size || pos.y < 0 || pos.y >= texture_size || pos.z < 0 || pos.z >= texture_size)
+	{
+		return;
+	}
+	else
+	{
+		const int sdfSize = 7;
+		const int fullWeightSize = 1;
+		for(int i = -sdfSize; i<=sdfSize; i++)
+			for(int j = -sdfSize; j <=sdfSize; j++)
+				for(int k = -sdfSize; k <=sdfSize; k++)
+				{
+					int3 possPos = (int3)pos + int3(i,j,k);
+					if (possPos.x < 0 || possPos.x >= texture_size || possPos.y < 0 || possPos.y >= texture_size || possPos.z < 0 || possPos.z >= texture_size)
+					{
+						continue;;
+					}
+					uint3 addr = output_pos + uint3(i,j,k);
+					float len = length(float3(i,j,k));
+					if ( len <= (float)fullWeightSize)
+					{
+						EncodeFloatWeightIntoUint(1.0f,addr);
+					}else if(len <= (float)sdfSize)
+					{
+						float weight = 1.0f / (len - fullWeightSize + 1.0f);
+						AddFloatWeightIntoUint(weight, addr);
+					}
+				}
+	}
+}
 
+[numthreads(4,4,4)]
+void UpdateOutputTexture(uint3 threadId : SV_DispatchThreadID)
+{
+	const int borderSize = 6; // 32 -> 128, 3 * 4 = 12
+	if (threadId.x < borderSize || threadId.x >= texture_size - borderSize
+		|| threadId.y < borderSize || threadId.y >= texture_size - borderSize
+		|| threadId.z < borderSize || threadId.z >= texture_size - borderSize)
+	{
+		return;
+	}
+	float weight = LoadFloatWeightFromTemp(threadId);
+	if (weight >= 0.5f)
+	{
+		OutputTexture[threadId] = float4(1,1,1,1);
+	}else
+	{
+		OutputTexture[threadId] = float4(0,0,0,0);
+	}
+	
+}
 [numthreads(8, 1, 1)]
 void Main(uint3 threadId : SV_DispatchThreadID)
 {
