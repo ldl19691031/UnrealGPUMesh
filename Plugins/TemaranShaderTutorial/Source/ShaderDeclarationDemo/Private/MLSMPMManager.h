@@ -16,6 +16,16 @@ struct FMLSMPMData : TSharedFromThis<FMLSMPMData>
 		float pad;
 		FMatrix C;
 	};
+	struct FCollisionData
+	{
+		FVector pos;
+		float radius;
+
+		FVector4 AsFloat4() const
+		{
+			return FVector4(pos, radius);
+		}
+	};
 	uint32 MaxParticles = 81920;
 	const uint32 N_Grid = 64;
 	const float dx = 1.0f / N_Grid;
@@ -51,12 +61,22 @@ struct FMLSMPMData : TSharedFromThis<FMLSMPMData>
 	FStructuredBufferRHIRef grid_texture_atomic;
 	FUnorderedAccessViewRHIRef grid_texture_atomic_uav;
 
+	FStructuredBufferRHIRef collision_buffer;
+	//FUnorderedAccessViewRHIRef collision_buffer_uav;
+	FShaderResourceViewRHIRef collision_buffer_srv;
+	TArray<FCollisionData> collision_data_cpu;
+	const int max_collision_count = 64;
+	
 	UGPUMeshComponent* visualizer;
 
 	FTexture3DRHIRef sdf_temp_texture;
 	FUnorderedAccessViewRHIRef sdf_temp_texture_uav;
+
+
 	
 	uint32 particle_num = 0;
+
+	uint32 collision_data_num = 0;
 	FMLSMPMData()
 	{
 			
@@ -73,6 +93,8 @@ struct FMLSMPMData : TSharedFromThis<FMLSMPMData>
 
 	void Visualize(FRHICommandList& RHICmdList);
 	void AddParticle(uint32 num);
+
+	void SetCollision(const TArray<FCollisionData>& CollisionDatas);
 private:
 	void InitializeTexture(FTexture3DRHIRef& RefCount, FUnorderedAccessViewRHIRef& RefCountPtr);
 private:

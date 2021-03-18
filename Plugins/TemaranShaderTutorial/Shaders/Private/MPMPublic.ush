@@ -7,3 +7,9 @@
 	float4x4 C;
 	
 };
+
+struct FCollisionData
+{
+	float3 pos;
+	float radius;
+};

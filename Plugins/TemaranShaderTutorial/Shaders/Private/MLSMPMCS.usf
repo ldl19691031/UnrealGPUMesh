@@ -1,23 +1,25 @@
 ﻿#include "/Engine/Public/Platform.ush"
 #include "MPMPublic.ush"
 #define FORCE_REFLECTION_ON_BORDER
-uint max_particles;
 
-uint n_grid;
+
+
 float dx;
 float inv_dx;
 float dt;
 float E;
-uint bound;
 
 float p_rho;
 float p_vol;
 float p_mass;
 float gravity;
-
+float4 collision;
 uint n_particles;
-
-
+uint collision_data_size;
+uint n_grid;
+uint max_particles;
+uint bound;
+float4 collision_data_array[8];
 
 RWStructuredBuffer<FParticleData> particleDataBuffer;
 
@@ -27,9 +29,13 @@ RWTexture3D<uint> grid_X;
 RWTexture3D<uint> grid_Y;
 RWTexture3D<uint> grid_Z;
 RWTexture3D<uint> grid_W;
-
+StructuredBuffer<FCollisionData> collisionData;
 //RWTexture3D<uint> grid_atomic;
 RWStructuredBuffer<uint> grid_atomic;
+
+
+
+
 //RWTexture3D<uint4> grid;
 static float3x3 identity = {
 	1.0f, 0.0f, 0.0f,
@@ -150,6 +156,65 @@ float HandleBorderVelocity(float original)
 #endif
 
 }
+
+void ApplyCollision(uint3 addr, out float3 out_grid_v)
+{
+	for (int i = 0; i < collision_data_size; i ++)
+	{
+		FCollisionData data = collisionData[i];
+			
+		float3 collisionCenter =  data.pos * n_grid + float3(n_grid / 2, n_grid / 2, n_grid / 2);
+		float collisionRadius = data.radius * n_grid / 2.0f;
+		float3 cood = float3(addr.x, addr.y, addr.z);
+		float distanceToCollisionCenter = length(cood - collisionCenter);
+		if (distanceToCollisionCenter < collisionRadius)
+		{
+			out_grid_v = (collisionRadius - distanceToCollisionCenter) * normalize(cood - collisionCenter) * 30.0f;
+		}
+	}
+}
+
+void ApplyBounds(uint3 threadId, float3 grid_v, float grid_m,out float3 out_grid_v)
+{
+	float inv_m = 1.0f / grid_m;
+	out_grid_v = grid_v * inv_m;
+
+	out_grid_v.z += - gravity * dt;
+		
+	if (threadId.x < bound && out_grid_v.x < 0)
+	{
+		//out_grid_v.x = 0.0f;
+		out_grid_v.x = HandleBorderVelocity(out_grid_v.x);
+	}
+	if (threadId.x > n_grid - bound && out_grid_v.x > 0)
+	{
+		//out_grid_v.x = 0.0f;
+		out_grid_v.x = HandleBorderVelocity(out_grid_v.x);
+	}
+		
+	if (threadId.y < bound && out_grid_v.y < 0)
+	{
+		//out_grid_v.y = 0.0f;
+		out_grid_v.y = HandleBorderVelocity(out_grid_v.y);
+	}
+	if (threadId.y > n_grid - bound && out_grid_v.y > 0)
+	{
+		//out_grid_v.y = 0.0f;
+		out_grid_v.y = HandleBorderVelocity(out_grid_v.y);
+	}
+		
+	if (threadId.z < bound && out_grid_v.z < 0)
+	{
+		//out_grid_v.z = 0.0f;
+		out_grid_v.z = HandleBorderVelocity(out_grid_v.z);
+	}
+	if (threadId.z > n_grid - bound && out_grid_v.z > 0)
+	{
+		//out_grid_v.z = 0.0f;
+		out_grid_v.z = HandleBorderVelocity(out_grid_v.z);
+	}
+}
+
 [numthreads(4,4,4)]
 void GridMain(uint3 threadId : SV_DispatchThreadID)
 {
@@ -165,43 +230,41 @@ void GridMain(uint3 threadId : SV_DispatchThreadID)
 	float3 out_grid_v = grid_v;
 	if (grid_m > 0.0f)
 	{
-		float inv_m = 1.0f / grid_m;
-		out_grid_v = grid_v * inv_m;
+		//ApplyCollision(addr, out_grid_v);
+		//for (int i = 0; i< 8; i++)
+		{
+			FCollisionData data;
+			data.pos = collision.xyz;
+			data.radius = collision.w;
+			if (data.radius > 0.001f)
+			{
+				float3 collisionCenter =  data.pos * n_grid + float3(n_grid / 2, n_grid / 2, n_grid / 2);
+				float collisionRadius = data.radius * n_grid / 2.0f;
+				float3 cood = float3(addr.x, addr.y, addr.z);
+				float distanceToCollisionCenter = length(cood - collisionCenter);
+				if (distanceToCollisionCenter < collisionRadius)
+				{
+					out_grid_v = (collisionRadius - distanceToCollisionCenter) * normalize(cood - collisionCenter) * 30.0f;
+				}
+			}
+			
+		}
+		ApplyBounds(threadId, grid_v, grid_m, out_grid_v);
 
-		out_grid_v.z += - gravity * dt;
+		// Collision
+		// {
+		// 	float3 collisionCenter = float3(32, 32, 0);
+		// 	float collisionRadius = 15;
+		// 	float3 cood = float3(addr.x, addr.y, addr.z);
+		// 	float distanceToCollisionCenter = length(cood - collisionCenter);
+		// 	if (distanceToCollisionCenter < collisionRadius)
+		// 	{
+		// 		out_grid_v = (collisionRadius - distanceToCollisionCenter) * normalize(cood - collisionCenter) * 30.0f;
+		// 	}
+		// }
+
 		
-		if (threadId.x < bound && out_grid_v.x < 0)
-		{
-			//out_grid_v.x = 0.0f;
-			out_grid_v.x = HandleBorderVelocity(out_grid_v.x);
-		}
-		if (threadId.x > n_grid - bound && out_grid_v.x > 0)
-		{
-			//out_grid_v.x = 0.0f;
-			out_grid_v.x = HandleBorderVelocity(out_grid_v.x);
-		}
-		
-		if (threadId.y < bound && out_grid_v.y < 0)
-		{
-			//out_grid_v.y = 0.0f;
-			out_grid_v.y = HandleBorderVelocity(out_grid_v.y);
-		}
-		if (threadId.y > n_grid - bound && out_grid_v.y > 0)
-		{
-			//out_grid_v.y = 0.0f;
-			out_grid_v.y = HandleBorderVelocity(out_grid_v.y);
-		}
-		
-		if (threadId.z < bound && out_grid_v.z < 0)
-		{
-			//out_grid_v.z = 0.0f;
-			out_grid_v.z = HandleBorderVelocity(out_grid_v.z);
-		}
-		if (threadId.z > n_grid - bound && out_grid_v.z > 0)
-		{
-			//out_grid_v.z = 0.0f;
-			out_grid_v.z = HandleBorderVelocity(out_grid_v.z);
-		}
+
 		SetDataToGrid(addr, out_grid_v, grid_m);
 	}
 }

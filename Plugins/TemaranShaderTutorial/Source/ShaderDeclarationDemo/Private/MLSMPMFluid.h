@@ -4,6 +4,8 @@
 
 #include "CoreMinimal.h"
 
+
+#include "FluidCollisionActor.h"
 #include "GPUMeshComponent.h"
 #include "Components/ActorComponent.h"
 #include "MLSMPMFluid.generated.h"
@@ -36,4 +38,6 @@ private:
 	float DeltaTimeCounter = 0.0f;
 
 	UGPUMeshComponent* Visualizer;
+
+	TArray<AFluidCollisionActor*> CollisionActors;
 };

@@ -3,6 +3,8 @@
 
 #include "MLSMPMFluid.h"
 
+
+#include "EngineUtils.h"
 #include "GPUMeshComponent.h"
 #include "MLSMPMManager.h"
 #include "ShaderDeclarationDemoModule.h"
@@ -33,6 +35,12 @@ void UMLSMPMFluid::BeginPlay()
 	{
 		Visualizer =Cast<UGPUMeshComponent>(c);
 	}
+	
+	for(TActorIterator<AFluidCollisionActor> It(GetWorld()); It; ++It)
+	{
+		CollisionActors.Add(*It);
+	}
+	
 }
 
 
@@ -47,8 +55,36 @@ void UMLSMPMFluid::TickComponent(float DeltaTime, ELevelTick TickType, FActorCom
 	// 	FluidData->AddParticle(ParticlePerSecond);
 	// 	DeltaTimeCounter = 0.0f;
 	// }
+	TArray<FMLSMPMData::FCollisionData> CollisionDatas;
+	for(auto CollisionActor : this->CollisionActors)
+	{
+		if (CollisionActor == nullptr || IsValid(CollisionActor) == false)
+		{
+			continue;;
+		}
+		FVector origin, extend;
+		CollisionActor->GetActorBounds(true, origin, extend);
+		if (extend.Size() <= 0.01f)
+		{
+			continue;
+		}
+		float scale = 1280.0f;
+		CollisionDatas.Add(
+            FMLSMPMData::FCollisionData{
+                origin / scale,
+                extend.Size() / scale
+            }
+        );
+	}
+	if (CollisionDatas.Num() > 0)
+	{
+		FluidData->SetCollision(CollisionDatas);
+	}
 	FluidData->gameThreadTickTime = DeltaTime;
 	FluidData->visualizer = this->Visualizer;
+	
+
+	
 	FShaderDeclarationDemoModule::Get().RequestTickMPMFluid();
 }
 

@@ -10,24 +10,28 @@
 
 
 #define MLSMPMBUFFER_DEF BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )\
-        SHADER_PARAMETER(UINT, max_particles)\
-        SHADER_PARAMETER(UINT, n_grid)\
         SHADER_PARAMETER(float, dx)\
         SHADER_PARAMETER(float, inv_dx)\
         SHADER_PARAMETER(float, dt)\
         SHADER_PARAMETER(float, E)\
-        SHADER_PARAMETER(UINT, bound)\
         SHADER_PARAMETER(float, p_rho)\
         SHADER_PARAMETER(float, p_vol)\
         SHADER_PARAMETER(float, p_mass)\
         SHADER_PARAMETER(float, gravity)\
+        SHADER_PARAMETER(FVector4, collision)\
         SHADER_PARAMETER(UINT, n_particles)\
+		SHADER_PARAMETER(UINT,collision_data_size)\
+		SHADER_PARAMETER(UINT, n_grid)\
+		SHADER_PARAMETER(UINT, max_particles)\
+		SHADER_PARAMETER(UINT, bound)\
+		SHADER_PARAMETER_ARRAY(FVector4, collision_data_array, [8])\
         SHADER_PARAMETER_UAV(RWStructuredBuffer<FParticleData>,particleDataBuffer )\
         SHADER_PARAMETER_UAV(RWTexture3D<float4>, grid )\
         SHADER_PARAMETER_UAV(RWTexture3D<uint>,grid_X)\
         SHADER_PARAMETER_UAV(RWTexture3D<uint>,grid_Y)\
         SHADER_PARAMETER_UAV(RWTexture3D<uint>,grid_Z)\
         SHADER_PARAMETER_UAV(RWTexture3D<uint>,grid_W)\
+        SHADER_PARAMETER_SRV(StructuredBuffer<FCollisionData>, collisionData)\
         SHADER_PARAMETER_UAV(RWStructuredBuffer<uint>, grid_atomic )\
   END_SHADER_PARAMETER_STRUCT()
 
@@ -54,6 +58,22 @@ void GetParametersFromMLSMPMData(const FMLSMPMData* data, T& param)
 	param.particleDataBuffer = data->particles_buffer_uav;
 	param.grid = data->grid_texture_uav;
 	param.grid_atomic = data->grid_texture_atomic_uav;
+	param.collisionData = data->collision_buffer_srv;
+	param.collision_data_size = data->collision_data_num;
+	if(data->collision_data_cpu.Num() > 0)
+	{
+		param.collision = data->collision_data_cpu[0].AsFloat4();
+	}
+	for(int i = 0; i < 8; i++)
+	{
+		if (i >= data->collision_data_cpu.Num())
+		{
+			param.collision_data_array[i] = FVector4(0,0,0,0);
+		}else
+		{
+			param.collision_data_array[i] = data->collision_data_cpu[i].AsFloat4();
+		}
+	}
 }
 
 class FMLSMPMShaderP2G : public FGlobalShader
@@ -271,6 +291,19 @@ void FMLSMPMData::Init_RenderThread(FRHICommandList& RHICmdList)
         );
 		sdf_temp_texture_uav = RHICreateUnorderedAccessView(sdf_temp_texture);
 	}
+	if (collision_buffer.IsValid() == false)
+	{
+		FRHIResourceCreateInfo CreateInfo;
+		collision_buffer = RHICreateStructuredBuffer(
+			sizeof(FCollisionData),
+			sizeof(FCollisionData) * max_collision_count,
+			BUF_ShaderResource | BUF_UnorderedAccess,
+			CreateInfo
+		);
+		collision_buffer_srv = RHICreateShaderResourceView(
+			collision_buffer
+		);
+	}	
 }
 void FMLSMPMData::InitializeTexture(FTexture3DRHIRef& InOut_grid_texture, FUnorderedAccessViewRHIRef& InOut_grid_texture_uav)
 {
@@ -289,6 +322,7 @@ void FMLSMPMData::InitializeTexture(FTexture3DRHIRef& InOut_grid_texture, FUnord
 		InOut_grid_texture_uav = RHICreateUnorderedAccessView(
             InOut_grid_texture
         );
+		
 	}
 }
 void FMLSMPMData::Release()
@@ -311,10 +345,26 @@ void FMLSMPMData::Release()
 	grid_textureW_uav.SafeRelease();
 	sdf_temp_texture.SafeRelease();
 	sdf_temp_texture_uav.SafeRelease();
+	collision_buffer.SafeRelease();
+	collision_buffer_srv.SafeRelease();
 	FMLSMPMManager::UnregisterData(SharedThis(this));
 	
 }
-
+void FMLSMPMData::SetCollision(const TArray<FCollisionData>& CollisionDatas)
+{
+	FMLSMPMData* Self = this;
+	collision_data_num = CollisionDatas.Num();
+	collision_data_cpu = CollisionDatas;
+	ENQUEUE_RENDER_COMMAND(SetCollisionData)
+    (
+        [Self, CollisionDatas](FRHICommandList& RHICmdList)
+        {
+            void* Buffer = RHILockStructuredBuffer(Self->collision_buffer, 0, sizeof(FCollisionData) * Self->max_collision_count, EResourceLockMode::RLM_WriteOnly );
+        	memcpy(Buffer, CollisionDatas.GetData(), CollisionDatas.Num() * sizeof(FCollisionData));
+        	RHIUnlockStructuredBuffer(Self->collision_buffer);
+        }
+    );
+}
 void FMLSMPMData::Substep(FRHICommandList& RHICmdList)
 {
 	QUICK_SCOPE_CYCLE_COUNTER(STAT_ShaderPlugin_MPLMPMSubStep); // Used to gather CPU profiling data for the UE4 session frontend
