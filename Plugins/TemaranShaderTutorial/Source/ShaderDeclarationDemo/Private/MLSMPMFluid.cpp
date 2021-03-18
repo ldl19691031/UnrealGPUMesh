@@ -68,10 +68,10 @@ void UMLSMPMFluid::TickComponent(float DeltaTime, ELevelTick TickType, FActorCom
 		{
 			continue;
 		}
-		float scale = 1280.0f;
+		float scale = 1000.0f;
 		CollisionDatas.Add(
             FMLSMPMData::FCollisionData{
-                origin / scale,
+                CollisionActor->GetActorLocation()  / scale,//origin / scale,
                 extend.Size() / scale
             }
         );

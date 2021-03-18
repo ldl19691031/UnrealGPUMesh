@@ -6,6 +6,7 @@
 #include "GlobalShader.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
+#include "ShaderCompilerCore.h"
 #include "ShaderParameterStruct.h"
 
 
@@ -20,18 +21,15 @@
         SHADER_PARAMETER(float, gravity)\
         SHADER_PARAMETER(FVector4, collision)\
         SHADER_PARAMETER(UINT, n_particles)\
-		SHADER_PARAMETER(UINT,collision_data_size)\
 		SHADER_PARAMETER(UINT, n_grid)\
 		SHADER_PARAMETER(UINT, max_particles)\
 		SHADER_PARAMETER(UINT, bound)\
-		SHADER_PARAMETER_ARRAY(FVector4, collision_data_array, [8])\
         SHADER_PARAMETER_UAV(RWStructuredBuffer<FParticleData>,particleDataBuffer )\
         SHADER_PARAMETER_UAV(RWTexture3D<float4>, grid )\
         SHADER_PARAMETER_UAV(RWTexture3D<uint>,grid_X)\
         SHADER_PARAMETER_UAV(RWTexture3D<uint>,grid_Y)\
         SHADER_PARAMETER_UAV(RWTexture3D<uint>,grid_Z)\
         SHADER_PARAMETER_UAV(RWTexture3D<uint>,grid_W)\
-        SHADER_PARAMETER_SRV(StructuredBuffer<FCollisionData>, collisionData)\
         SHADER_PARAMETER_UAV(RWStructuredBuffer<uint>, grid_atomic )\
   END_SHADER_PARAMETER_STRUCT()
 
@@ -58,22 +56,22 @@ void GetParametersFromMLSMPMData(const FMLSMPMData* data, T& param)
 	param.particleDataBuffer = data->particles_buffer_uav;
 	param.grid = data->grid_texture_uav;
 	param.grid_atomic = data->grid_texture_atomic_uav;
-	param.collisionData = data->collision_buffer_srv;
-	param.collision_data_size = data->collision_data_num;
+	//param.collisionData = data->collision_buffer_srv;
+	//param.collision_data_size = data->collision_data_num;
 	if(data->collision_data_cpu.Num() > 0)
 	{
 		param.collision = data->collision_data_cpu[0].AsFloat4();
 	}
-	for(int i = 0; i < 8; i++)
-	{
-		if (i >= data->collision_data_cpu.Num())
-		{
-			param.collision_data_array[i] = FVector4(0,0,0,0);
-		}else
-		{
-			param.collision_data_array[i] = data->collision_data_cpu[i].AsFloat4();
-		}
-	}
+	// for(int i = 0; i < 8; i++)
+	// {
+	// 	if (i >= data->collision_data_cpu.Num())
+	// 	{
+	// 		param.collision_data_array[i] = FVector4(0,0,0,0);
+	// 	}else
+	// 	{
+	// 		param.collision_data_array[i] = data->collision_data_cpu[i].AsFloat4();
+	// 	}
+	// }
 }
 
 class FMLSMPMShaderP2G : public FGlobalShader
@@ -103,6 +101,13 @@ public:
 	{
 		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
 	}
+	// static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment)
+	// {
+	// 	FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+	// 	// Force shader model 6.0+
+	// 	OutEnvironment.CompilerFlags.Add(CFLAG_ForceDXC);
+	// }
+	
 };
 IMPLEMENT_GLOBAL_SHADER(FMLSMPMShaderGridMain, "/TutorialShaders/Private/MLSMPMCS.usf", "GridMain", SF_Compute);
 
@@ -218,7 +223,7 @@ void FMLSMPMData::Init_RenderThread(FRHICommandList& RHICmdList)
 		{
 			for (UINT j = 10; j < N_Grid - 10; j+= 2)
 			{
-				for (UINT k = 35; k < 40; k+= 2)
+				for (UINT k = 35; k < 50; k+= 2)
 				{
 					FParticleData instance = initialData;
 					instance.x = FVector(i,j,k) / (float)N_Grid;
@@ -276,7 +281,7 @@ void FMLSMPMData::Init_RenderThread(FRHICommandList& RHICmdList)
 			grid_texture_atomic, false, false
         );
 	}
-	if (sdf_temp_texture.IsValid() == false && visualizer != nullptr)
+	if (sdf_temp_texture.IsValid() == false && visualizer != nullptr && IsValid(visualizer))
 	{
 		FRHIResourceCreateInfo CreateInfo;
 		uint32 size = visualizer->GetTextureSize();

@@ -15,11 +15,11 @@ float p_mass;
 float gravity;
 float4 collision;
 uint n_particles;
-uint collision_data_size;
+//uint collision_data_size;
 uint n_grid;
 uint max_particles;
 uint bound;
-float4 collision_data_array[8];
+//float4 collision_data_array[8];
 
 RWStructuredBuffer<FParticleData> particleDataBuffer;
 
@@ -29,7 +29,7 @@ RWTexture3D<uint> grid_X;
 RWTexture3D<uint> grid_Y;
 RWTexture3D<uint> grid_Z;
 RWTexture3D<uint> grid_W;
-StructuredBuffer<FCollisionData> collisionData;
+//StructuredBuffer<FCollisionData> collisionData;
 //RWTexture3D<uint> grid_atomic;
 RWStructuredBuffer<uint> grid_atomic;
 
@@ -42,6 +42,8 @@ static float3x3 identity = {
 	0.0f, 1.0f, 0.0f,
 	0.0f, 0.0f, 1.0f
 };
+
+
 
 // from https://www.gamedev.net/forums/topic/613648-dx11-interlockedadd-on-floats-in-pixel-shader-workaround/
 void InterlockedAddFloat(RWTexture3D<uint> data, uint3 addr, float value ) // Works perfectly! <- original comment, I won't remove because it inspires confidence
@@ -59,7 +61,7 @@ void InterlockedAddFloat(RWTexture3D<uint> data, uint3 addr, float value ) // Wo
 	}
 }
 
-void GetDataFromGrid(uint3 addr, out float3 grid_v, out float grid_m)
+void GetDataFromGrid(uint3 addr, out float3 grid_v,out float grid_m)
 {
 	float4 data;
 	data.x = asfloat(grid_X[addr]);
@@ -157,29 +159,26 @@ float HandleBorderVelocity(float original)
 
 }
 
-void ApplyCollision(uint3 addr, out float3 out_grid_v)
-{
-	for (int i = 0; i < collision_data_size; i ++)
-	{
-		FCollisionData data = collisionData[i];
-			
-		float3 collisionCenter =  data.pos * n_grid + float3(n_grid / 2, n_grid / 2, n_grid / 2);
-		float collisionRadius = data.radius * n_grid / 2.0f;
-		float3 cood = float3(addr.x, addr.y, addr.z);
-		float distanceToCollisionCenter = length(cood - collisionCenter);
-		if (distanceToCollisionCenter < collisionRadius)
-		{
-			out_grid_v = (collisionRadius - distanceToCollisionCenter) * normalize(cood - collisionCenter) * 30.0f;
-		}
-	}
-}
+// void ApplyCollision(uint3 addr, out float3 out_grid_v)
+// {
+// 	for (int i = 0; i < collision_data_size; i ++)
+// 	{
+// 		FCollisionData data = collisionData[i];
+// 			
+// 		float3 collisionCenter =  data.pos * n_grid + float3(n_grid / 2, n_grid / 2, n_grid / 2);
+// 		float collisionRadius = data.radius * n_grid / 2.0f;
+// 		float3 cood = float3(addr.x, addr.y, addr.z);
+// 		float distanceToCollisionCenter = length(cood - collisionCenter);
+// 		if (distanceToCollisionCenter < collisionRadius)
+// 		{
+// 			out_grid_v = (collisionRadius - distanceToCollisionCenter) * normalize(cood - collisionCenter) * 30.0f;
+// 		}
+// 	}
+// }
 
-void ApplyBounds(uint3 threadId, float3 grid_v, float grid_m,out float3 out_grid_v)
+void ApplyBounds(uint3 threadId, float grid_m,inout float3 out_grid_v)
 {
-	float inv_m = 1.0f / grid_m;
-	out_grid_v = grid_v * inv_m;
 
-	out_grid_v.z += - gravity * dt;
 		
 	if (threadId.x < bound && out_grid_v.x < 0)
 	{
@@ -214,7 +213,10 @@ void ApplyBounds(uint3 threadId, float3 grid_v, float grid_m,out float3 out_grid
 		out_grid_v.z = HandleBorderVelocity(out_grid_v.z);
 	}
 }
-
+inline float3 projectOnPlane( float3 vec, float3 normal )
+{
+	return vec - normal * dot( vec, normal );
+}
 [numthreads(4,4,4)]
 void GridMain(uint3 threadId : SV_DispatchThreadID)
 {
@@ -230,10 +232,15 @@ void GridMain(uint3 threadId : SV_DispatchThreadID)
 	float3 out_grid_v = grid_v;
 	if (grid_m > 0.0f)
 	{
+		float inv_m = 1.0f / grid_m;
+		out_grid_v = out_grid_v * inv_m;
+
+		out_grid_v.z += - gravity * dt;
+		
 		//ApplyCollision(addr, out_grid_v);
 		//for (int i = 0; i< 8; i++)
 		{
-			FCollisionData data;
+			FCollisionData data = (FCollisionData)0;
 			data.pos = collision.xyz;
 			data.radius = collision.w;
 			if (data.radius > 0.001f)
@@ -242,14 +249,24 @@ void GridMain(uint3 threadId : SV_DispatchThreadID)
 				float collisionRadius = data.radius * n_grid / 2.0f;
 				float3 cood = float3(addr.x, addr.y, addr.z);
 				float distanceToCollisionCenter = length(cood - collisionCenter);
+				float3 dirToCenter = normalize(cood - collisionCenter);
+			
 				if (distanceToCollisionCenter < collisionRadius)
 				{
-					out_grid_v = (collisionRadius - distanceToCollisionCenter) * normalize(cood - collisionCenter) * 30.0f;
+					float lengthToBorder = (collisionRadius - distanceToCollisionCenter) / n_grid;
+					//out_grid_v = projectOnPlane(out_grid_v,dirToCenter) ;//(collisionRadius - distanceToCollisionCenter) * normalize(cood - collisionCenter) * 0.01f;
+					//out_grid_v = clamp(out_grid_v, -0.001f, 0.001f);
+					{
+						float3 outColliderVelocity = dirToCenter * 1.0f * lengthToBorder;
+						outColliderVelocity.z = 0.0f;
+						out_grid_v += outColliderVelocity;				
+					}
+
 				}
 			}
 			
 		}
-		ApplyBounds(threadId, grid_v, grid_m, out_grid_v);
+		ApplyBounds(threadId, grid_m, out_grid_v);
 
 		// Collision
 		// {
@@ -315,7 +332,7 @@ void G2P(uint3 threadId : SV_DispatchThreadID)
 		NewParticleData.v = float3(0.001f,0.001f,0.001f);
 	}else
 	{
-		NewParticleData.v = new_v;//clamp(new_v, -10000.f, 10000.f);
+		NewParticleData.v = clamp(new_v, -10.f, 10.f);
 	}
 	float3 offset = dt * NewParticleData.v;
 	if (any(isnan(offset)) == false)

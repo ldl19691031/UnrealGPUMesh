@@ -22,5 +22,7 @@ void AFluidCollisionActor::BeginPlay()
 void AFluidCollisionActor::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+	Velocity = GetActorLocation() - LastPosition;
+	
 }
 
