@@ -18,22 +18,23 @@ public:
     		return reinterpret_cast<size_t>(&UniquePointer);
     	}
 
-	void InitSDFTexture(UGPUMeshComponent* Component)
+	void CreateSDFTexture_RenderThread(UGPUMeshComponent* Component, FGPUMeshSceneProxy* Self, UVolumeTexture* SDFTextureVolume, bool IsInitFromSDFTexture)
 	{
-		FGPUMeshSceneProxy* Self = this;
-		UVolumeTexture* SDFTextureVolume = Component->SDFTexture;
-		if (IsInRenderingThread())
+		int TextureSizeX = IsInitFromSDFTexture ? SDFTextureVolume->GetSizeX() : Component->SDFTextureSize;
+		int TextureSizeY = IsInitFromSDFTexture ? SDFTextureVolume->GetSizeY() : Component->SDFTextureSize;
+		int TextureSizeZ = IsInitFromSDFTexture ? SDFTextureVolume->GetSizeZ() : Component->SDFTextureSize;
+		FRHIResourceCreateInfo CreateInfo;
+		Self->SDFTexture =  RHICreateTexture3D(
+			TextureSizeX,
+			TextureSizeY,
+			TextureSizeZ,
+			PF_B8G8R8A8,
+			1,
+			TexCreate_ShaderResource | TexCreate_UAV,
+			CreateInfo
+		);
+		if (IsInitFromSDFTexture)
 		{
-			FRHIResourceCreateInfo CreateInfo;
-			Self->SDFTexture =  RHICreateTexture3D(
-                SDFTextureVolume->GetSizeX(),
-                SDFTextureVolume->GetSizeY(),
-                SDFTextureVolume->GetSizeZ(),
-                PF_B8G8R8A8,
-                1,
-                TexCreate_ShaderResource | TexCreate_UAV,
-                CreateInfo
-            );
 			FRHICopyTextureInfo copyInfo;
 			{
 				copyInfo.NumMips = 0;
@@ -42,34 +43,28 @@ public:
 				copyInfo.NumSlices = SDFTextureVolume->GetSizeZ();
 			}
 			GetImmediateCommandList_ForRenderCommand().CopyTexture(SDFTextureVolume->Resource->TextureRHI, Self->SDFTexture, copyInfo);
-			Self->SDFTextureUAV = RHICreateUnorderedAccessView(Self->SDFTexture);
+		}
+		Self->SDFTextureUAV = RHICreateUnorderedAccessView(Self->SDFTexture);
+		Component->SDFTextureUAV = Self->SDFTextureUAV;
+	}
+
+	void InitSDFTexture(UGPUMeshComponent* Component)
+	{
+		FGPUMeshSceneProxy* Self = this;
+		UVolumeTexture* SDFTextureVolume = Component->SDFTexture;
+		bool IsInitFromSDFTexture = SDFTextureVolume != nullptr;
+		
+		if (IsInRenderingThread())
+		{
+			CreateSDFTexture_RenderThread(Component, Self, SDFTextureVolume, IsInitFromSDFTexture);
 		}else
 		{
 			ENQUEUE_RENDER_COMMAND(InitVolumeTextureFromVolumeTexture)
 	        (
-	            [Self, SDFTextureVolume](FRHICommandList& RHICmdList)
+	            [Self, SDFTextureVolume, Component](FRHICommandList& RHICmdList)
 	            {
-	                FRHIResourceCreateInfo CreateInfo;
-	                Self->SDFTexture =  RHICreateTexture3D(
-	                    SDFTextureVolume->GetSizeX(),
-	                    SDFTextureVolume->GetSizeY(),
-	                    SDFTextureVolume->GetSizeZ(),
-	                    PF_B8G8R8A8,
-	                    1,
-	                    TexCreate_ShaderResource | TexCreate_UAV,
-	                    CreateInfo
-	                );
-	                FRHICopyTextureInfo copyInfo;
-	                {
-	                    copyInfo.NumMips = 0;
-	                    copyInfo.SourceMipIndex = 0;
-	                    copyInfo.DestMipIndex = 0;
-	                    copyInfo.NumSlices = SDFTextureVolume->GetSizeZ();
-	                }
-	                RHICmdList.CopyTexture(SDFTextureVolume->Resource->TextureRHI, Self->SDFTexture, copyInfo);
-	                Self->SDFTextureUAV = RHICreateUnorderedAccessView(Self->SDFTexture);
-	            	Self->OwnerComponent->SDFTextureUAV = Self->SDFTextureUAV;
-	            	
+	            	bool IsInitFromSDFTexture = SDFTextureVolume != nullptr;
+	            	Self->CreateSDFTexture_RenderThread(Component, Self, SDFTextureVolume, IsInitFromSDFTexture);
 	            }
 	        );
 		}
@@ -96,7 +91,7 @@ public:
 		BeginInitResource(&VertexBuffers.ColorVertexBuffer);
 		BeginInitResource(&IndexBuffer);
 		BeginInitResource(&VertexFactory);
-		if (Component->SDFTexture != nullptr)
+		//if (Component->SDFTexture != nullptr)
 		{
 			InitSDFTexture(Component);
 		}
@@ -129,25 +124,23 @@ public:
 		{
 			SDFTexture.SafeRelease();
 		}
+		OwnerComponent->SDFTextureUAV = nullptr;
 		if (SDFTextureUAV.IsValid())
 		{
 			SDFTextureUAV.SafeRelease();
 		}
 		BrushBuffer.SafeRelease();
 		BrushBufferShaderResourceView.SafeRelease();
+		
 	}
 	void UpdateMesh_RenderThread()
 	{
 		check(IsInRenderingThread());
 		if (SDFTexture.IsValid() == false || SDFTextureUAV.IsValid() == false)
 		{
-			if (OwnerComponent->SDFTexture != nullptr)
+			//if (OwnerComponent->SDFTexture != nullptr)
 			{
 				InitSDFTexture(OwnerComponent);
-			}
-			else
-			{
-				return;
 			}
 		}
 		FShaderDeclarationDemoModule::Get().UpdateGPUMesh(
@@ -165,13 +158,9 @@ public:
 		check(IsInRenderingThread());
 		if (SDFTexture.IsValid() == false || SDFTextureUAV.IsValid() == false)
 		{
-			if (OwnerComponent->SDFTexture != nullptr)
+			//if (OwnerComponent->SDFTexture != nullptr)
 			{
 				InitSDFTexture(OwnerComponent);
-			}
-			else
-			{
-				return;
 			}
 			
 		}
@@ -357,6 +346,11 @@ void UGPUMeshComponent::TickComponent(float DeltaTime, ELevelTick TickType,
         });
 
 	}
+}
+
+void UGPUMeshComponent::InitializeComponent()
+{
+
 }
 
 FPrimitiveSceneProxy* UGPUMeshComponent::CreateSceneProxy()

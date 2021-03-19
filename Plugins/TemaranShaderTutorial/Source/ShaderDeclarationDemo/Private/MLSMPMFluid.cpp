@@ -18,7 +18,7 @@ UMLSMPMFluid::UMLSMPMFluid()
 
 	// ...
 
-	FluidData = MakeShared<FMLSMPMData>();
+	FluidData = new FMLSMPMData();
 }
 
 
@@ -91,6 +91,13 @@ void UMLSMPMFluid::TickComponent(float DeltaTime, ELevelTick TickType, FActorCom
 void UMLSMPMFluid::DestroyComponent(bool bPromoteChildren)
 {
 	Super::DestroyComponent(bPromoteChildren);
+	
+}
+
+void UMLSMPMFluid::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	Super::EndPlay(EndPlayReason);
 	FluidData->Release();
+	delete FluidData;
 }
 

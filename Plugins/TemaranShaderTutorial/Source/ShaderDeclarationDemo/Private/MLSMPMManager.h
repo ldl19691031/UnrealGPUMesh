@@ -26,7 +26,7 @@ struct FMLSMPMData : TSharedFromThis<FMLSMPMData>
 			return FVector4(pos, radius);
 		}
 	};
-	uint32 MaxParticles = 81920;
+	uint32 MaxParticles = 1048576;
 	const uint32 N_Grid = 64;
 	const float dx = 1.0f / N_Grid;
 	const float inv_dx = 1.0f / dx;
@@ -77,6 +77,9 @@ struct FMLSMPMData : TSharedFromThis<FMLSMPMData>
 	uint32 particle_num = 0;
 
 	uint32 collision_data_num = 0;
+
+	
+	const UINT32 GROUP_SIZE = 1024;
 	FMLSMPMData()
 	{
 			
@@ -109,11 +112,12 @@ private:
 class SHADERDECLARATIONDEMO_API FMLSMPMManager
 {
 public:
-	static TArray<TSharedPtr<FMLSMPMData>> MLSMPMDatas;
+	static TArray<FMLSMPMData*> MLSMPMDatas;
 
-	static void RegisterData(TSharedPtr<FMLSMPMData> data);
+	static void RegisterData(FMLSMPMData* data);
 
-	static void UnregisterData(TSharedPtr<FMLSMPMData> data);
+	static void UnregisterData(FMLSMPMData* data);
 
 	static void Update_RenderThread(FRHICommandList& RHICmdList);
+
 };

@@ -96,7 +96,7 @@ float3x3 OuterProduct(float3 a, float3 b)
 	);
 	return result;
 }
-[numthreads(8, 1, 1)]
+[numthreads(1024, 1, 1)]
 void P2G(uint3 threadId : SV_DispatchThreadID)
 {
 	uint p = threadId.x;
@@ -286,7 +286,7 @@ void GridMain(uint3 threadId : SV_DispatchThreadID)
 	}
 }
 
-[numthreads(8,1,1)]
+[numthreads(1024,1,1)]
 void G2P(uint3 threadId : SV_DispatchThreadID)
 {
 	uint p = threadId.x;

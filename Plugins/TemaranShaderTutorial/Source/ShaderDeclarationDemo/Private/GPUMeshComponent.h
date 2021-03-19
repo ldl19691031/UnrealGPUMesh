@@ -9,6 +9,7 @@
 #include "GPUDynamicVertexBuffer.h"
 #include "Engine/VolumeTexture.h"
 
+
 #include "GPUMeshComponent.generated.h"
 
 
@@ -37,6 +38,9 @@ public:
 
 	UPROPERTY(VisibleAnywhere, Category="GPU Mesh")
 	TArray<class UGPUMeshBrush*> MeshBrushes;
+
+	UPROPERTY(EditAnywhere, Category="GPU Mesh")
+	int SDFTextureSize = 128;
 public:
 	// Sets default values for this component's properties
 	UGPUMeshComponent();
@@ -50,16 +54,18 @@ public:
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType,
 	                           FActorComponentTickFunction* ThisTickFunction) override;
 
-
+	virtual void InitializeComponent() override;
 	virtual FPrimitiveSceneProxy* CreateSceneProxy() override;
 
 	virtual int32 GetNumMaterials() const override { return 1; }
 
 	virtual FBoxSphereBounds CalcBounds(const FTransform& LocalToWorld) const override;
 
-	UINT GetTextureSize() { return SDFTexture ? SDFTexture->GetSizeX() : 0; }
-	FUnorderedAccessViewRHIRef SDFTextureUAV;
+	UINT GetTextureSize() { return SDFTexture ? SDFTexture->GetSizeX() : SDFTextureSize; }
 
+	FUnorderedAccessViewRHIRef SDFTextureUAV;
+private:
+	FTexture3DRHIRef SDFTextureInternal;
 	
 };
 struct FGPUMeshVertexBuffers

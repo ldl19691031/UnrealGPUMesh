@@ -182,7 +182,7 @@ void FShaderDeclarationDemoModule::Draw_RenderThread(
 
 	FComputeShaderExample::RunComputeShader_RenderThread(RHICmdList, DrawParameters, ComputeShaderOutput->GetRenderTargetItem().UAV);
 	FPixelShaderExample::DrawToRenderTarget_RenderThread(RHICmdList, DrawParameters, ComputeShaderOutput->GetRenderTargetItem().TargetableTexture);
-	FGPUMeshShader::RunComputeShader_RenderThread(RHICmdList, GPUMeshDrawParameters, SDFRenderTarget->GetRenderTargetItem().UAV, GPUMeshShaderOutput->GetRenderTargetItem().UAV);
+	//FGPUMeshShader::RunComputeShader_RenderThread(RHICmdList, GPUMeshDrawParameters, SDFRenderTarget->GetRenderTargetItem().UAV, GPUMeshShaderOutput->GetRenderTargetItem().UAV);
 	if (ShouldTickMPMFluid)
 	{
 		FMLSMPMManager::Update_RenderThread(RHICmdList);

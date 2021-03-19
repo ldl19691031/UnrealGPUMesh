@@ -186,7 +186,7 @@ void FMLSMPMData::Init()
 			Self->Init_RenderThread(RHICmdList);
 		}
 	);
-	FMLSMPMManager::RegisterData(SharedThis(this));
+	FMLSMPMManager::RegisterData(this);
 	//particle_num = 10;
 }
 
@@ -223,7 +223,7 @@ void FMLSMPMData::Init_RenderThread(FRHICommandList& RHICmdList)
 		{
 			for (UINT j = 10; j < N_Grid - 10; j+= 2)
 			{
-				for (UINT k = 35; k < 50; k+= 2)
+				for (UINT k = 35; k < 60; k+= 2)
 				{
 					FParticleData instance = initialData;
 					instance.x = FVector(i,j,k) / (float)N_Grid;
@@ -352,7 +352,7 @@ void FMLSMPMData::Release()
 	sdf_temp_texture_uav.SafeRelease();
 	collision_buffer.SafeRelease();
 	collision_buffer_srv.SafeRelease();
-	FMLSMPMManager::UnregisterData(SharedThis(this));
+	FMLSMPMManager::UnregisterData(this);
 	
 }
 void FMLSMPMData::SetCollision(const TArray<FCollisionData>& CollisionDatas)
@@ -385,12 +385,14 @@ void FMLSMPMData::Substep(FRHICommandList& RHICmdList)
 	// uint8* Buffer = (uint8*)RHILockStructuredBuffer(n_particles_buffer, 0, sizeof(int), RLM_ReadOnly);
 	// particle_num = (*(int*)(Buffer));
 	// RHIUnlockStructuredBuffer(n_particles_buffer);
+
+	
 	//P2G
 	{
 		FMLSMPMShaderP2G::FParameters P2GParameters;
 		GetParametersFromMLSMPMData(this, P2GParameters);
 		TShaderMapRef<FMLSMPMShaderP2G> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
-		int DispatchNum = particle_num / 8 + 1;
+		int DispatchNum = particle_num / GROUP_SIZE + 1;
 		FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader, P2GParameters, FIntVector(DispatchNum, 1, 1));
 	}
 
@@ -408,7 +410,7 @@ void FMLSMPMData::Substep(FRHICommandList& RHICmdList)
 		FMLSMPMShaderG2P::FParameters G2PParameters;
 		GetParametersFromMLSMPMData(this, G2PParameters);
 		TShaderMapRef<FMLSMPMShaderG2P> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
-		int DispatchNum = particle_num / 8 + 1;
+		int DispatchNum = particle_num / GROUP_SIZE + 1;
 		FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader, G2PParameters, FIntVector(DispatchNum, 1, 1));
 	}
 	
@@ -463,12 +465,12 @@ void FMLSMPMData::AddParticle(uint32 num)
 	NeedUpdateParticleNum = true;
 }
 
-void FMLSMPMManager::RegisterData(TSharedPtr<FMLSMPMData> data)
+void FMLSMPMManager::RegisterData(FMLSMPMData* data)
 {
 	MLSMPMDatas.Add(data);
 }
 
-void FMLSMPMManager::UnregisterData(TSharedPtr<FMLSMPMData> data)
+void FMLSMPMManager::UnregisterData(FMLSMPMData* data)
 {
 	MLSMPMDatas.Remove(data);
 }
@@ -491,4 +493,4 @@ void FMLSMPMManager::Update_RenderThread(FRHICommandList& RHICmdList)
 }
 
 
-TArray<TSharedPtr<FMLSMPMData>> FMLSMPMManager::MLSMPMDatas;
+TArray<FMLSMPMData*> FMLSMPMManager::MLSMPMDatas;

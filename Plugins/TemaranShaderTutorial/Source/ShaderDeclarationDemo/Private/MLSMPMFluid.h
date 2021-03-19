@@ -32,8 +32,10 @@ public:
 	                           FActorComponentTickFunction* ThisTickFunction) override;
 
 	virtual void DestroyComponent(bool bPromoteChildren) override;
+
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 private:
-	TSharedPtr<struct FMLSMPMData> FluidData;
+	struct FMLSMPMData* FluidData;
 
 	float DeltaTimeCounter = 0.0f;
 

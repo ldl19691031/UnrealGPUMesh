@@ -144,6 +144,23 @@ void MainComputeShader(uint3 threadId : SV_DispatchThreadID)
         SampleData(threadId + int3(0, 1, 0))
     };
 
+	{
+		//Early Exit
+		float totalValue = 0.0f;
+		[unroll]
+		for (int i= 0; i < 8; i++)
+		{
+			totalValue += val[i];
+		}
+		if (totalValue < 0.001f)
+		{
+			return;
+		}
+		if(totalValue > 7.99f)
+		{
+			return;
+		}
+	}
 	int cubeIndex = 0;
 	if (val[0] < isoLevel) cubeIndex |= 1;
 	if (val[1] < isoLevel) cubeIndex |= 2;
