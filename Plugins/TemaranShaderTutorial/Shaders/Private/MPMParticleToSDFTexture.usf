@@ -5,6 +5,8 @@ RWStructuredBuffer<FParticleData> particleDataBuffer;
 RWTexture3D<uint> SDFTempTexture;
 RWTexture3D<float4> OutputTexture;
 
+RWTexture3D<uint> Grid_W;
+RWStructuredBuffer<uint> GridCoordBuffer;
 uint n_particles;
 uint texture_size;
 
@@ -24,7 +26,11 @@ float LoadFloatWeightFromTemp(uint3 addr)
 {
 	return ((float)SDFTempTexture[addr]) / 100.0f;
 }
-[numthreads(8, 1, 1)]
+float GetGridM(uint3 addr)
+{
+	return asfloat(Grid_W[addr]);
+}
+[numthreads(1024, 1, 1)]
 void ScatterParticleToTempTexture(uint3 threadId : SV_DispatchThreadID)
 {
 	uint p = threadId.x;
@@ -87,7 +93,27 @@ void UpdateOutputTexture(uint3 threadId : SV_DispatchThreadID)
 	{
 		OutputTexture[threadId] = float4(0,0,0,0);
 	}
-	
+	float totalWeight = 0.0f;
+	for(int i = -2; i <=2 ; i++)
+		for(int j = -2; j <=2 ; j ++)
+			for(int k = -2; k <=2; k++)
+			{
+				uint3 addr = uint3( int3(threadId) + int3(i,j,k));
+				float w = LoadFloatWeightFromTemp(addr);
+				if (w > 0.5f)
+				{
+					totalWeight += 1.0f;
+				}
+			}
+	if (totalWeight > 0.0f && totalWeight < 125.0f)
+	{
+		uint writeIndex;
+		InterlockedAdd(GridCoordBuffer[0], 3, writeIndex);
+		writeIndex = writeIndex + 1;
+		GridCoordBuffer[writeIndex] = threadId.x;
+		GridCoordBuffer[writeIndex + 1] = threadId.y;
+		GridCoordBuffer[writeIndex + 2] = threadId.z;
+	}
 }
 [numthreads(8, 1, 1)]
 void Main(uint3 threadId : SV_DispatchThreadID)

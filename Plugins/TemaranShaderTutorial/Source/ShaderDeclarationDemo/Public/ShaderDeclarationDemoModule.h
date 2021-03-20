@@ -71,6 +71,8 @@ struct FGPUMeshControlParams
 {
 	FVector Offset;
 	FVector Scale;
+	bool UseGridBuffer;
+	FUnorderedAccessViewRHIRef GridBufferUAV;
 };
 /*
  * Since we already have a module interface due to us being in a plugin, it's pretty handy to just use it

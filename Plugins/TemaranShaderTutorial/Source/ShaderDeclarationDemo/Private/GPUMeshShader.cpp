@@ -113,6 +113,59 @@ public:
 		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Z"), NUM_THREADS_PER_GROUP_DIMENSION);
 	}
 };
+
+class FGPUMeshShaderGridCS : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FGPUMeshShaderGridCS);
+	SHADER_USE_PARAMETER_STRUCT(FGPUMeshShaderGridCS, FGlobalShader);
+
+	struct Vertex
+	{
+		FVector vPosition;
+		FVector vNormal;
+	};
+
+	struct Triangle
+	{
+		Vertex v[3];
+	};
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+        //SHADER_PARAMETER_UAV(RWTexture3D<float4>, InputTexture)
+        SHADER_PARAMETER_TEXTURE(Texture3D<float4>, InputTexture)
+        SHADER_PARAMETER_TEXTURE(Texture2D<uint>, TriTableTexture)
+        SHADER_PARAMETER_UAV(RWStructuredBuffer<uint>, RWVertexCounterBuffer)
+        //SHADER_PARAMETER_UAV(RWTexture2D<float4>, OutputTexture)
+        SHADER_PARAMETER_UAV(RWStructuredBuffer<float3>, RWVertexPositionBuffer)
+        SHADER_PARAMETER_UAV(RWStructuredBuffer<FPackedNormal>, RWVertexTangentBuffer)
+        SHADER_PARAMETER_UAV(RWStructuredBuffer<uint>,RWGridBuffer)
+        SHADER_PARAMETER_UAV(AppendStructuredBuffer<Triangle>,OutputBufferTest)
+        SHADER_PARAMETER_SAMPLER(SamplerState, myLinearClampSampler)
+        SHADER_PARAMETER(FVector4, InputTextureSize)
+        SHADER_PARAMETER(FVector4, InputSlice)
+        SHADER_PARAMETER(FVector,vertexOffset)
+        SHADER_PARAMETER(FVector,vertexScale)
+        SHADER_PARAMETER(float,isoLevel)
+        SHADER_PARAMETER(int, gridSize)
+        SHADER_PARAMETER(int, vertexCounter)
+    END_SHADER_PARAMETER_STRUCT()
+
+public:
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	static inline void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_X"), 1024);
+		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Y"), NUM_THREADS_PER_GROUP_DIMENSION);
+		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Z"), NUM_THREADS_PER_GROUP_DIMENSION);
+	}
+
+};
 class FGPUMeshCopyToTextureCS : public FGlobalShader
 {
 public:
@@ -165,12 +218,32 @@ public:
 	}
 
 };
+
+class FBuildIndirectDrawCS : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FBuildIndirectDrawCS);
+	SHADER_USE_PARAMETER_STRUCT(FBuildIndirectDrawCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+            SHADER_PARAMETER_UAV(RWStructuredBuffer<uint>, GridBuffer)
+            SHADER_PARAMETER_UAV(RWStructuredBuffer<uint>, IndirectDrawArgBuffer)
+     END_SHADER_PARAMETER_STRUCT()
+
+public:
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+};
 // This will tell the engine to create the shader and where the shader entry point is.
 //                            ShaderType                            ShaderPath                     Shader function name    Type
 IMPLEMENT_GLOBAL_SHADER(FGPUMeshShaderCS, "/TutorialShaders/Private/GPUMeshShaderCS.usf", "MainComputeShader", SF_Compute);
 IMPLEMENT_GLOBAL_SHADER(FGPUMeshCopyToTextureCS, "/TutorialShaders/Private/GPUMeshCopyToTextureCS.usf", "MainComputeShader", SF_Compute);
 IMPLEMENT_GLOBAL_SHADER(FGPUSDFModifyCS, "/TutorialShaders/Private/GPUSDFModifier.usf","MainComputeShader",SF_Compute);
 IMPLEMENT_GLOBAL_SHADER(FGPUMeshShaderCS2, "/TutorialShaders/Private/GPUMeshShaderCS2.usf", "MainComputeShader", SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FGPUMeshShaderGridCS, "/TutorialShaders/Private/GPUMeshShaderCS2.usf", "GridMain", SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FBuildIndirectDrawCS, "/TutorialShaders/Private/GPUMeshBuildIndirectDrawParamCS.usf", "Main", SF_Compute);
 
 static FTexture2DRHIRef TriLookUpTexture;
 static FStructuredBufferRHIRef VertexCounterBuffer;
@@ -388,6 +461,8 @@ void FGPUMeshShader::RunComputeShader_RenderThread(
 
 	RHICmdList.CopyToResolveTarget(ShaderOutputTexture, OriginalRT, FResolveParams());
 }
+static FVertexBufferRHIRef IndirectArgBuffer = nullptr;
+static FUnorderedAccessViewRHIRef IndirectArgBufferUAV;
 
 void FGPUMeshShader::UpdateMeshBySDFGPU(
 	FRHICommandListImmediate& RHICmdList,
@@ -403,68 +478,155 @@ void FGPUMeshShader::UpdateMeshBySDFGPU(
 	{
 		return;
 	}
-	FGPUMeshShaderCS2::FParameters PassParameters;
-	PassParameters.vertexOffset = ControlParams.Offset;
-	PassParameters.vertexScale = ControlParams.Scale;
-	PassParameters.InputTexture = SDFTexture;
-	if (VertexCounterBuffer.IsValid() == false)
+	if (ControlParams.UseGridBuffer)
 	{
-		FRHIResourceCreateInfo rhiCreateInfo;
-		VertexCounterBuffer = RHICreateStructuredBuffer(sizeof(int), sizeof(int), BUF_ShaderResource| BUF_UnorderedAccess,rhiCreateInfo);
-		VertexCounterBufferUAV = RHICreateUnorderedAccessView(VertexCounterBuffer,false,false);
+		check(ControlParams.GridBufferUAV.IsValid());
+		FGPUMeshShaderGridCS::FParameters PassParameters;
+		PassParameters.vertexOffset = ControlParams.Offset;
+		PassParameters.vertexScale = ControlParams.Scale;
+		PassParameters.InputTexture = SDFTexture;
+		if (VertexCounterBuffer.IsValid() == false)
+		{
+			FRHIResourceCreateInfo rhiCreateInfo;
+			VertexCounterBuffer = RHICreateStructuredBuffer(sizeof(int), sizeof(int), BUF_ShaderResource| BUF_UnorderedAccess,rhiCreateInfo);
+			VertexCounterBufferUAV = RHICreateUnorderedAccessView(VertexCounterBuffer,false,false);
+			
+			uint8* Buffer = (uint8*)RHILockStructuredBuffer(VertexCounterBuffer, 0, sizeof(int), RLM_WriteOnly);
+			(*(int*)(Buffer))= 0;
+			RHIUnlockStructuredBuffer(VertexCounterBuffer);
+		}
+		RHICmdList.TransitionResource(EResourceTransitionAccess::ERWBarrier, EResourceTransitionPipeline::EGfxToCompute, VertexCounterBufferUAV);
+		RHIGetDefaultContext()->RHIClearUAVUint(VertexCounterBufferUAV,FUintVector4(0));
+		RHIGetDefaultContext()->RHIClearUAVFloat( VertexBuffers->PositionVertexBuffer.UnorderedAccessViewRHI, FVector4(0,0,0,0));
+		RHIGetDefaultContext()->RHIClearUAVFloat( VertexBuffers->DynamicTangentXBuffer.UnorderedAccessViewRHI, FVector4(0,0,0,0));
+		PassParameters.RWVertexCounterBuffer = VertexCounterBufferUAV;
+
+		PassParameters.InputTextureSize = FVector4(SDFTexture->GetSizeX(), SDFTexture->GetSizeY(), SDFTexture->GetSizeZ(), 0);
+		//PassParameters.InputSlice = FVector4(ShaderOutputTexture->GetSizeX() / SDFTexture->GetSizeX(), ShaderOutputTexture->GetSizeY() / SDFTexture->GetSizeY(), 0, 0);
+		PassParameters.isoLevel = 0.5f;
+		PassParameters.gridSize = SDFTexture->GetSizeX();
+		PassParameters.vertexCounter = 0;
+		if (SamplerState.IsValid() == false)
+		{
+			SamplerState =  RHICreateSamplerState(FSamplerStateInitializerRHI(
+	            ESamplerFilter::SF_Trilinear,
+	            ESamplerAddressMode::AM_Clamp,
+	            ESamplerAddressMode::AM_Clamp,
+	            ESamplerAddressMode::AM_Clamp
+	        ));
+		}
+		PassParameters.myLinearClampSampler = SamplerState;
+		if (TriLookUpTexture.IsValid() == false)
+		{
+			FRHIResourceCreateInfo createInfoTexture;
+			TriLookUpTexture = RHICreateTexture2D(
+	            16,
+	            256,
+	            PF_R8_UINT,
+	            1,
+	            1,
+	            TexCreate_ShaderResource | TexCreate_UAV,
+	            createInfoTexture
+	            );
+			uint32 DestStride;
+			void* data = RHICmdList.LockTexture2D(TriLookUpTexture,0, EResourceLockMode::RLM_WriteOnly,DestStride, false);
+			memcpy(data, triTable, sizeof(triTable) * sizeof(uint8));
+			RHICmdList.UnlockTexture2D(TriLookUpTexture, 0, false);
+		}
+		PassParameters.TriTableTexture = TriLookUpTexture;
 		
-		uint8* Buffer = (uint8*)RHILockStructuredBuffer(VertexCounterBuffer, 0, sizeof(int), RLM_WriteOnly);
-		(*(int*)(Buffer))= 0;
-		RHIUnlockStructuredBuffer(VertexCounterBuffer);
-	}
-	RHICmdList.TransitionResource(EResourceTransitionAccess::ERWBarrier, EResourceTransitionPipeline::EGfxToCompute, VertexCounterBufferUAV);
-	RHIGetDefaultContext()->RHIClearUAVUint(VertexCounterBufferUAV,FUintVector4(0));
-	RHIGetDefaultContext()->RHIClearUAVFloat( VertexBuffers->PositionVertexBuffer.UnorderedAccessViewRHI, FVector4(0,0,0,0));
-	RHIGetDefaultContext()->RHIClearUAVFloat( VertexBuffers->DynamicTangentXBuffer.UnorderedAccessViewRHI, FVector4(0,0,0,0));
-	PassParameters.RWVertexCounterBuffer = VertexCounterBufferUAV;
+		PassParameters.RWVertexPositionBuffer = VertexBuffers->PositionVertexBuffer.UnorderedAccessViewRHI;
+		PassParameters.RWVertexTangentBuffer = VertexBuffers->DynamicTangentXBuffer.UnorderedAccessViewRHI;
 
-	PassParameters.InputTextureSize = FVector4(SDFTexture->GetSizeX(), SDFTexture->GetSizeY(), SDFTexture->GetSizeZ(), 0);
-	//PassParameters.InputSlice = FVector4(ShaderOutputTexture->GetSizeX() / SDFTexture->GetSizeX(), ShaderOutputTexture->GetSizeY() / SDFTexture->GetSizeY(), 0, 0);
-	PassParameters.isoLevel = 0.5f;
-	PassParameters.gridSize = SDFTexture->GetSizeX();
-	PassParameters.vertexCounter = 0;
-	if (SamplerState.IsValid() == false)
-	{
-		SamplerState =  RHICreateSamplerState(FSamplerStateInitializerRHI(
-            ESamplerFilter::SF_Trilinear,
-            ESamplerAddressMode::AM_Clamp,
-            ESamplerAddressMode::AM_Clamp,
-            ESamplerAddressMode::AM_Clamp
-        ));
+		if (IndirectArgBuffer == nullptr)
+		{
+			FRHIResourceCreateInfo CreateInfo;
+			IndirectArgBuffer = RHICreateVertexBuffer(
+				sizeof(FRHIDispatchIndirectParameters) * 3,
+				BUF_Static | BUF_DrawIndirect | BUF_UnorderedAccess | BUF_ShaderResource,
+				CreateInfo
+			);
+			IndirectArgBufferUAV = RHICreateUnorderedAccessView(IndirectArgBuffer, PF_R32_UINT);
+		}
+		{
+			FBuildIndirectDrawCS::FParameters indirectBuildDrawParam;
+			indirectBuildDrawParam.GridBuffer = ControlParams.GridBufferUAV;
+			indirectBuildDrawParam.IndirectDrawArgBuffer = IndirectArgBufferUAV;
+			TShaderMapRef<FBuildIndirectDrawCS> BuildComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+			FComputeShaderUtils::Dispatch(RHICmdList, BuildComputeShader, indirectBuildDrawParam, FIntVector(1,1,1));
+		}
+		PassParameters.RWGridBuffer = ControlParams.GridBufferUAV;
+		TShaderMapRef<FGPUMeshShaderGridCS> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+		FComputeShaderUtils::DispatchIndirect(RHICmdList, ComputeShader, PassParameters, IndirectArgBuffer, 0 );
 	}
-	PassParameters.myLinearClampSampler = SamplerState;
-	if (TriLookUpTexture.IsValid() == false)
+	else
 	{
-		FRHIResourceCreateInfo createInfoTexture;
-		TriLookUpTexture = RHICreateTexture2D(
-            16,
-            256,
-            PF_R8_UINT,
-            1,
-            1,
-            TexCreate_ShaderResource | TexCreate_UAV,
-            createInfoTexture
-            );
-		uint32 DestStride;
-		void* data = RHICmdList.LockTexture2D(TriLookUpTexture,0, EResourceLockMode::RLM_WriteOnly,DestStride, false);
-		memcpy(data, triTable, sizeof(triTable) * sizeof(uint8));
-		RHICmdList.UnlockTexture2D(TriLookUpTexture, 0, false);
+		FGPUMeshShaderCS2::FParameters PassParameters;
+		PassParameters.vertexOffset = ControlParams.Offset;
+		PassParameters.vertexScale = ControlParams.Scale;
+		PassParameters.InputTexture = SDFTexture;
+		if (VertexCounterBuffer.IsValid() == false)
+		{
+			FRHIResourceCreateInfo rhiCreateInfo;
+			VertexCounterBuffer = RHICreateStructuredBuffer(sizeof(int), sizeof(int), BUF_ShaderResource| BUF_UnorderedAccess,rhiCreateInfo);
+			VertexCounterBufferUAV = RHICreateUnorderedAccessView(VertexCounterBuffer,false,false);
+			
+			uint8* Buffer = (uint8*)RHILockStructuredBuffer(VertexCounterBuffer, 0, sizeof(int), RLM_WriteOnly);
+			(*(int*)(Buffer))= 0;
+			RHIUnlockStructuredBuffer(VertexCounterBuffer);
+		}
+		RHICmdList.TransitionResource(EResourceTransitionAccess::ERWBarrier, EResourceTransitionPipeline::EGfxToCompute, VertexCounterBufferUAV);
+		RHIGetDefaultContext()->RHIClearUAVUint(VertexCounterBufferUAV,FUintVector4(0));
+		RHIGetDefaultContext()->RHIClearUAVFloat( VertexBuffers->PositionVertexBuffer.UnorderedAccessViewRHI, FVector4(0,0,0,0));
+		RHIGetDefaultContext()->RHIClearUAVFloat( VertexBuffers->DynamicTangentXBuffer.UnorderedAccessViewRHI, FVector4(0,0,0,0));
+		PassParameters.RWVertexCounterBuffer = VertexCounterBufferUAV;
+
+		PassParameters.InputTextureSize = FVector4(SDFTexture->GetSizeX(), SDFTexture->GetSizeY(), SDFTexture->GetSizeZ(), 0);
+		//PassParameters.InputSlice = FVector4(ShaderOutputTexture->GetSizeX() / SDFTexture->GetSizeX(), ShaderOutputTexture->GetSizeY() / SDFTexture->GetSizeY(), 0, 0);
+		PassParameters.isoLevel = 0.5f;
+		PassParameters.gridSize = SDFTexture->GetSizeX();
+		PassParameters.vertexCounter = 0;
+		if (SamplerState.IsValid() == false)
+		{
+			SamplerState =  RHICreateSamplerState(FSamplerStateInitializerRHI(
+	            ESamplerFilter::SF_Trilinear,
+	            ESamplerAddressMode::AM_Clamp,
+	            ESamplerAddressMode::AM_Clamp,
+	            ESamplerAddressMode::AM_Clamp
+	        ));
+		}
+		PassParameters.myLinearClampSampler = SamplerState;
+		if (TriLookUpTexture.IsValid() == false)
+		{
+			FRHIResourceCreateInfo createInfoTexture;
+			TriLookUpTexture = RHICreateTexture2D(
+	            16,
+	            256,
+	            PF_R8_UINT,
+	            1,
+	            1,
+	            TexCreate_ShaderResource | TexCreate_UAV,
+	            createInfoTexture
+	            );
+			uint32 DestStride;
+			void* data = RHICmdList.LockTexture2D(TriLookUpTexture,0, EResourceLockMode::RLM_WriteOnly,DestStride, false);
+			memcpy(data, triTable, sizeof(triTable) * sizeof(uint8));
+			RHICmdList.UnlockTexture2D(TriLookUpTexture, 0, false);
+		}
+		PassParameters.TriTableTexture = TriLookUpTexture;
+		
+		TShaderMapRef<FGPUMeshShaderCS2> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+		FIntVector GroupCounts = FIntVector(
+	        SDFTexture->GetSizeX() / NUM_THREADS_PER_GROUP_DIMENSION,
+	        SDFTexture->GetSizeY() / NUM_THREADS_PER_GROUP_DIMENSION,
+	        SDFTexture->GetSizeZ() / NUM_THREADS_PER_GROUP_DIMENSION
+	        );
+
+		PassParameters.RWVertexPositionBuffer = VertexBuffers->PositionVertexBuffer.UnorderedAccessViewRHI;
+		PassParameters.RWVertexTangentBuffer = VertexBuffers->DynamicTangentXBuffer.UnorderedAccessViewRHI;
+
+
+		FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader, PassParameters, GroupCounts);
 	}
-	PassParameters.TriTableTexture = TriLookUpTexture;
 	
-	TShaderMapRef<FGPUMeshShaderCS2> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
-	FIntVector GroupCounts = FIntVector(
-        SDFTexture->GetSizeX() / NUM_THREADS_PER_GROUP_DIMENSION,
-        SDFTexture->GetSizeY() / NUM_THREADS_PER_GROUP_DIMENSION,
-        SDFTexture->GetSizeZ() / NUM_THREADS_PER_GROUP_DIMENSION
-        );
-
-	PassParameters.RWVertexPositionBuffer = VertexBuffers->PositionVertexBuffer.UnorderedAccessViewRHI;
-	PassParameters.RWVertexTangentBuffer = VertexBuffers->DynamicTangentXBuffer.UnorderedAccessViewRHI;
-	FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader, PassParameters, GroupCounts);
 }

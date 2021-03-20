@@ -29,11 +29,12 @@ void UMLSMPMFluid::BeginPlay()
 
 	// ...
 	FluidData->Init();
-
+	
 	UActorComponent* c =GetOwner()->GetComponentByClass(UGPUMeshComponent::StaticClass());
 	if (c != nullptr)
 	{
 		Visualizer =Cast<UGPUMeshComponent>(c);
+		Visualizer->SetUseGridIndexBuffer(true);
 	}
 	
 	for(TActorIterator<AFluidCollisionActor> It(GetWorld()); It; ++It)

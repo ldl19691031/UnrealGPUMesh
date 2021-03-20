@@ -132,6 +132,8 @@ IMPLEMENT_GLOBAL_SHADER(FMLSMPMShaderG2P, "/TutorialShaders/Private/MLSMPMCS.usf
 			SHADER_PARAMETER_UAV(RWStructuredBuffer<FParticleData>, particleDataBuffer)\
 			SHADER_PARAMETER_UAV(RWTexture3D<uint>, SDFTempTexture)\
 			SHADER_PARAMETER_UAV(RWTexture3D<float4>,OutputTexture)\
+			SHADER_PARAMETER_UAV(RWTexture3D<uint>, Grid_W)\
+			SHADER_PARAMETER_UAV(RWStructuredBuffer<uint>, GridCoordBuffer)\
 		END_SHADER_PARAMETER_STRUCT()
 class FMPMToSDFTextureShader : public FGlobalShader
 {
@@ -424,6 +426,7 @@ void FMLSMPMData::Visualize(FRHICommandList& RHICmdList)
 	{
 		RHICmdList.ClearUAVFloat(visualizer->SDFTextureUAV, FVector4(0,0,0,0));
 		RHICmdList.ClearUAVUint(sdf_temp_texture_uav, FUintVector4(0,0,0,0));
+		RHICmdList.ClearUAVUint(visualizer->GridIndexBufferUAV, FUintVector4(0,0,0,0));
 		{
 			//Scatter Pass
 			FScatterParticleToTempBufferShader::FParameters ScatterPassParams;
@@ -432,7 +435,7 @@ void FMLSMPMData::Visualize(FRHICommandList& RHICmdList)
 			ScatterPassParams.particleDataBuffer = particles_buffer_uav;
 			ScatterPassParams.SDFTempTexture = sdf_temp_texture_uav;
 			TShaderMapRef<FScatterParticleToTempBufferShader> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
-			int DispatchNum = particle_num / 8 + 1;
+			int DispatchNum = particle_num / 1024 + 1;
 			FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader, ScatterPassParams, FIntVector(DispatchNum, 1, 1));
 		}
 		{
@@ -443,6 +446,8 @@ void FMLSMPMData::Visualize(FRHICommandList& RHICmdList)
 			OutputUpdatePassParams.particleDataBuffer = particles_buffer_uav;
 			OutputUpdatePassParams.SDFTempTexture = sdf_temp_texture_uav;
 			OutputUpdatePassParams.OutputTexture = visualizer->SDFTextureUAV;
+			OutputUpdatePassParams.GridCoordBuffer = visualizer->GridIndexBufferUAV;
+			OutputUpdatePassParams.Grid_W = this->grid_textureW_uav;
 			TShaderMapRef<FTempBufferToOutputTextureShader> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
 			FIntVector DispatchNum = FIntVector(
 				OutputUpdatePassParams.texture_size / 4 + 1

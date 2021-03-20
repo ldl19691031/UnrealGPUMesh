@@ -64,9 +64,19 @@ public:
 	UINT GetTextureSize() { return SDFTexture ? SDFTexture->GetSizeX() : SDFTextureSize; }
 
 	FUnorderedAccessViewRHIRef SDFTextureUAV;
+
+	FUnorderedAccessViewRHIRef GridIndexBufferUAV;
+
+	void SetUseGridIndexBuffer(bool use)
+	{
+		UseGridIndexBuffer = use;
+	}
 private:
 	FTexture3DRHIRef SDFTextureInternal;
-	
+
+	bool UseGridIndexBuffer;
+
+	friend  class FGPUMeshSceneProxy;
 };
 struct FGPUMeshVertexBuffers
 {

@@ -1,0 +1,12 @@
+﻿#include "/Engine/Public/Platform.ush"
+RWStructuredBuffer<uint> GridBuffer;
+RWStructuredBuffer<uint> IndirectDrawArgBuffer;
+
+[numthreads(1,1,1)]
+void Main(uint3 threadId : SV_DispatchThreadID)
+{
+	uint totalGridCoordCount = GridBuffer[0];
+	IndirectDrawArgBuffer[0] = totalGridCoordCount / 3 / 1024 + 1;
+	IndirectDrawArgBuffer[1] = 1;
+	IndirectDrawArgBuffer[2] = 1;
+}

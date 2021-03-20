@@ -95,6 +95,25 @@ public:
 		{
 			InitSDFTexture(Component);
 		}
+		{
+			FGPUMeshSceneProxy* Self = this;
+			ENQUEUE_RENDER_COMMAND(InitGridIndexBuffers)
+	        (
+	        [Self](FRHICommandList& RHIcmd)
+	                {
+	        			FRHIResourceCreateInfo rhiCreateInfo;
+						Self->GridIndexBuffer =  RHICreateStructuredBuffer(
+							sizeof(UINT),
+							sizeof(UINT) * 3000000,
+							BUF_ShaderResource| BUF_UnorderedAccess,
+							rhiCreateInfo
+						);
+	        			Self->GridIndexBufferUAV = RHICreateUnorderedAccessView(Self->GridIndexBuffer, false, false);
+	        			Self->OwnerComponent->GridIndexBufferUAV = Self->GridIndexBufferUAV;
+	                }
+	        );
+		}
+		
 		if (BrushBuffer.IsValid() == false)
 		{
 			FGPUMeshSceneProxy* Self = this;
@@ -132,6 +151,10 @@ public:
 		BrushBuffer.SafeRelease();
 		BrushBufferShaderResourceView.SafeRelease();
 		
+		OwnerComponent->GridIndexBufferUAV = nullptr;
+		GridIndexBuffer.SafeRelease();
+		GridIndexBufferUAV.SafeRelease();
+		
 	}
 	void UpdateMesh_RenderThread()
 	{
@@ -143,12 +166,18 @@ public:
 				InitSDFTexture(OwnerComponent);
 			}
 		}
+		FGPUMeshControlParams params = FGPUMeshControlParams{
+			OwnerComponent->VertexOffset,
+            OwnerComponent->VertexScale,
+            OwnerComponent->UseGridIndexBuffer
+        };
+		if (OwnerComponent->UseGridIndexBuffer)
+		{
+			params.GridBufferUAV = this->GridIndexBufferUAV;
+		}
 		FShaderDeclarationDemoModule::Get().UpdateGPUMesh(
 			SDFTexture,
-			FGPUMeshControlParams{
-                OwnerComponent->VertexOffset,
-                OwnerComponent->VertexScale
-            },
+			params,
 			&VertexBuffers
 		);
 	}
@@ -272,6 +301,7 @@ virtual void GetDynamicMeshElements(const TArray<const FSceneView*>& Views, cons
 	{
 		return(FPrimitiveSceneProxy::GetAllocatedSize());
 	}
+
 private:
 	UVolumeTexture* SdfVolumeTexture;
 	
@@ -293,6 +323,10 @@ private:
 
 	FShaderResourceViewRHIRef BrushBufferShaderResourceView;
 
+	FStructuredBufferRHIRef GridIndexBuffer;
+
+	FUnorderedAccessViewRHIRef GridIndexBufferUAV;
+	
 	UGPUMeshComponent* OwnerComponent;
 };
 // Sets default values for this component's properties

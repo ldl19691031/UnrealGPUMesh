@@ -104,7 +104,13 @@ void P2G(uint3 threadId : SV_DispatchThreadID)
 	{
 		return;
 	}
+	
 	FParticleData particleData = particleDataBuffer[p];
+	if(any(isnan(particleData.v))|| any(isnan(particleData.x)))
+	{
+		return;
+	}
+
 	int3 base = (int3)(particleData.x / dx  - 0.5f);
 
 	float3 fx = particleData.x / dx - float3(base.x,base.y,base.z);
