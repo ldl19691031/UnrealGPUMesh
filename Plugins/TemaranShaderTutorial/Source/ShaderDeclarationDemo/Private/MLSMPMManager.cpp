@@ -451,7 +451,7 @@ void FMLSMPMData::Visualize(FRHICommandList& RHICmdList, FPostOpaqueRenderParame
 			OutputUpdatePassParams.Grid_W = this->grid_textureW_uav;
 			TUniformBufferRef<FViewUniformShaderParameters> Ref;
 			*Ref.GetInitReference() = Parameters.ViewUniformBuffer;
-			Ref->AddRef();
+			//Ref->AddRef();
 			OutputUpdatePassParams.View = Ref;
 			
 			const TShaderMapRef<FTempBufferToOutputTextureShader> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
@@ -461,7 +461,7 @@ void FMLSMPMData::Visualize(FRHICommandList& RHICmdList, FPostOpaqueRenderParame
 			
 			FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader, OutputUpdatePassParams, DispatchNum);
 			//Ref->Release();
-			*Ref.GetInitReference() = nullptr;
+			//*Ref.GetInitReference() = nullptr;
 			
 		}
 	// 	FMPMToSDFTextureShader::FParameters PassParameters;

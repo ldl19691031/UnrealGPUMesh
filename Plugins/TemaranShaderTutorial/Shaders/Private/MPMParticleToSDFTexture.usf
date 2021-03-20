@@ -96,19 +96,39 @@ void UpdateOutputTexture(uint3 threadId : SV_DispatchThreadID)
 	}
 	float totalWeight = 0.0f;
 	float3 worldCameraPos = View.WorldCameraOrigin;
+	float3 dirToCamera = normalize(worldCameraPos);
+	bool containsZero;
+	bool containsOne;
+	bool isCovered = true;
+	bool surroundVoxels[9];
+	float w;
 	for(int i = -2; i <=2 ; i++)
 		for(int j = -2; j <=2 ; j ++)
 			for(int k = -2; k <=2; k++)
 			{
 				uint3 addr = uint3( int3(threadId) + int3(i,j,k));
-				float w = LoadFloatWeightFromTemp(addr);
+				w = LoadFloatWeightFromTemp(addr);
+				float3 localDir = float3(i,j,k);
+				float cos = dot(localDir, dirToCamera);
+				if (cos > 0.0f)
+				{
+					if(w < 0.5f)
+					{
+						isCovered = false;
+					}
+				}
 				if (w > 0.5f)
 				{
-					totalWeight += 1.0f;
+						containsOne = true;
+				}else
+				{
+						containsZero = true;
 				}
+				
 			}
-	if (totalWeight > 0.0f && totalWeight < 125.0f)
+	if (containsOne && containsZero && isCovered == false)
 	{
+		
 		uint writeIndex;
 		InterlockedAdd(GridCoordBuffer[0], 3, writeIndex);
 		writeIndex = writeIndex + 1;
