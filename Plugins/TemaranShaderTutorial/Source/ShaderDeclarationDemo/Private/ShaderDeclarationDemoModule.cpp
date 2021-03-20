@@ -28,6 +28,7 @@ DECLARE_GPU_STAT_NAMED(ShaderPlugin_Pixel, TEXT("ShaderPlugin: Render Pixel Shad
 void FShaderDeclarationDemoModule::StartupModule()
 {
 	OnPostResolvedSceneColorHandle.Reset();
+	OnPostOpaqueHandle.Reset();
 	bCachedParametersValid = false;
 
 	// Maps virtual shader source directory to the plugin's actual shaders directory.
@@ -42,19 +43,27 @@ void FShaderDeclarationDemoModule::ShutdownModule()
 
 void FShaderDeclarationDemoModule::BeginRendering()
 {
-	if (OnPostResolvedSceneColorHandle.IsValid())
-	{
-		return;
-	}
-
-	bCachedParametersValid = false;
-
 	const FName RendererModuleName("Renderer");
 	IRendererModule* RendererModule = FModuleManager::GetModulePtr<IRendererModule>(RendererModuleName);
-	if (RendererModule)
+	if (OnPostResolvedSceneColorHandle.IsValid() == false)
 	{
-		OnPostResolvedSceneColorHandle = RendererModule->GetResolvedSceneColorCallbacks().AddRaw(this, &FShaderDeclarationDemoModule::PostResolveSceneColor_RenderThread);
+		bCachedParametersValid = false;
+		if (RendererModule)
+		{
+			OnPostResolvedSceneColorHandle = RendererModule->GetResolvedSceneColorCallbacks().AddRaw(this, &FShaderDeclarationDemoModule::PostResolveSceneColor_RenderThread);
+		}
 	}
+	if (OnPostOpaqueHandle.IsValid() == false)
+	{
+		bCachedParametersValid = false;
+		if (RendererModule)
+		{
+			OnPostOpaqueHandle = RendererModule->RegisterPostOpaqueRenderDelegate(FPostOpaqueRenderDelegate::CreateRaw(this, &FShaderDeclarationDemoModule::PostOpaque_RenderThread));
+		}
+	}
+	
+
+	
 }
 
 void FShaderDeclarationDemoModule::EndRendering()
@@ -142,6 +151,17 @@ void FShaderDeclarationDemoModule::PostResolveSceneColor_RenderThread(FRHIComman
 	RenderEveryFrameLock.Unlock();
 
 	Draw_RenderThread(Copy, MeshParamterCopy);
+}
+
+void FShaderDeclarationDemoModule::PostOpaque_RenderThread(FPostOpaqueRenderParameters& Parameters)
+{
+	check(IsInRenderingThread());
+	FRHICommandListImmediate& RHICmdList = GRHICommandList.GetImmediateCommandList();
+
+	QUICK_SCOPE_CYCLE_COUNTER(STAT_ShaderPlugin_Render); // Used to gather CPU profiling data for the UE4 session frontend
+	SCOPED_DRAW_EVENT(RHICmdList, ShaderPlugin_Render); // Used to profile GPU activity and add metadata to be consumed by for example RenderDoc
+
+	FMLSMPMManager::Visualize_RenderThread(RHICmdList, Parameters);
 }
 
 void FShaderDeclarationDemoModule::Draw_RenderThread(

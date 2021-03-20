@@ -127,6 +127,7 @@ public:
 IMPLEMENT_GLOBAL_SHADER(FMLSMPMShaderG2P, "/TutorialShaders/Private/MLSMPMCS.usf", "G2P", SF_Compute);
 
 #define MPMPARTICLETOTEXTUERPARAMETER  BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )\
+			SHADER_PARAMETER_STRUCT_REF(FViewUniformShaderParameters, View)\
 			SHADER_PARAMETER(UINT, n_particles)\
 			SHADER_PARAMETER(UINT, texture_size)\
 			SHADER_PARAMETER_UAV(RWStructuredBuffer<FParticleData>, particleDataBuffer)\
@@ -420,7 +421,7 @@ void FMLSMPMData::Substep(FRHICommandList& RHICmdList)
 
 
 
-void FMLSMPMData::Visualize(FRHICommandList& RHICmdList)
+void FMLSMPMData::Visualize(FRHICommandList& RHICmdList, FPostOpaqueRenderParameters& Parameters)
 {
 	if (visualizer != nullptr && visualizer->SDFTextureUAV.IsValid())
 	{
@@ -434,7 +435,7 @@ void FMLSMPMData::Visualize(FRHICommandList& RHICmdList)
 			ScatterPassParams.texture_size = visualizer->GetTextureSize();
 			ScatterPassParams.particleDataBuffer = particles_buffer_uav;
 			ScatterPassParams.SDFTempTexture = sdf_temp_texture_uav;
-			TShaderMapRef<FScatterParticleToTempBufferShader> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+			const TShaderMapRef<FScatterParticleToTempBufferShader> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
 			int DispatchNum = particle_num / 1024 + 1;
 			FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader, ScatterPassParams, FIntVector(DispatchNum, 1, 1));
 		}
@@ -448,11 +449,20 @@ void FMLSMPMData::Visualize(FRHICommandList& RHICmdList)
 			OutputUpdatePassParams.OutputTexture = visualizer->SDFTextureUAV;
 			OutputUpdatePassParams.GridCoordBuffer = visualizer->GridIndexBufferUAV;
 			OutputUpdatePassParams.Grid_W = this->grid_textureW_uav;
-			TShaderMapRef<FTempBufferToOutputTextureShader> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
-			FIntVector DispatchNum = FIntVector(
+			TUniformBufferRef<FViewUniformShaderParameters> Ref;
+			*Ref.GetInitReference() = Parameters.ViewUniformBuffer;
+			Ref->AddRef();
+			OutputUpdatePassParams.View = Ref;
+			
+			const TShaderMapRef<FTempBufferToOutputTextureShader> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+			const FIntVector DispatchNum = FIntVector(
 				OutputUpdatePassParams.texture_size / 4 + 1
 			);
+			
 			FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader, OutputUpdatePassParams, DispatchNum);
+			//Ref->Release();
+			*Ref.GetInitReference() = nullptr;
+			
 		}
 	// 	FMPMToSDFTextureShader::FParameters PassParameters;
 	// 	PassParameters.n_particles = this->particle_num;
@@ -493,9 +503,18 @@ void FMLSMPMManager::Update_RenderThread(FRHICommandList& RHICmdList)
 		{
 			data->Substep(RHICmdList);
 		}
-		data->Visualize(RHICmdList);
+		//data->Visualize(RHICmdList);
 	}
 }
-
+void FMLSMPMManager::Visualize_RenderThread(FRHICommandList& RHICmdList, FPostOpaqueRenderParameters& Parameters)
+{
+	QUICK_SCOPE_CYCLE_COUNTER(STAT_ShaderPlugin_MPLMPMVisualize); // Used to gather CPU profiling data for the UE4 session frontend
+	SCOPED_DRAW_EVENT(RHICmdList, ShaderPlugin_MPLMPMVisualize);
+	check(IsInRenderingThread());
+	for (auto data : MLSMPMDatas)
+	{
+		data->Visualize(RHICmdList, Parameters);
+	}
+}
 
 TArray<FMLSMPMData*> FMLSMPMManager::MLSMPMDatas;

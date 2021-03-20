@@ -94,7 +94,7 @@ struct FMLSMPMData : TSharedFromThis<FMLSMPMData>
 
 	void Substep(FRHICommandList& RHICmdList);
 
-	void Visualize(FRHICommandList& RHICmdList);
+	void Visualize(FRHICommandList& RHICmdList, FPostOpaqueRenderParameters& Parameters);
 	void AddParticle(uint32 num);
 
 	void SetCollision(const TArray<FCollisionData>& CollisionDatas);
@@ -120,4 +120,5 @@ public:
 
 	static void Update_RenderThread(FRHICommandList& RHICmdList);
 
+	static void Visualize_RenderThread(FRHICommandList& RHICmdList, FPostOpaqueRenderParameters& Parameters);
 };

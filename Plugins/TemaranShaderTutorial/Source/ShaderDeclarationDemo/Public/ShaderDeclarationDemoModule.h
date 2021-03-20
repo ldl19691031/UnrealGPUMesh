@@ -146,11 +146,13 @@ private:
 	FShaderUsageExampleParameters CachedShaderUsageExampleParameters;
 	FGPUMeshParameters CachedGPUMeshParameters;
 	FDelegateHandle OnPostResolvedSceneColorHandle;
+	FDelegateHandle OnPostOpaqueHandle;
 	FCriticalSection RenderEveryFrameLock;
 	std::function<void(void)> UpdateMeshRequests;
 	volatile bool bCachedParametersValid;
 	bool ShouldTickMPMFluid = false;
 	void PostResolveSceneColor_RenderThread(FRHICommandListImmediate& RHICmdList, class FSceneRenderTargets& SceneContext);
+	void PostOpaque_RenderThread(FPostOpaqueRenderParameters& Parameters);
 	void Draw_RenderThread(
 		const FShaderUsageExampleParameters& DrawParameters,
 		const FGPUMeshParameters& GPUMeshDrawParameters);

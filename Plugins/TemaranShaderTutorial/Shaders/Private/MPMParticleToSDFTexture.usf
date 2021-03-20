@@ -1,4 +1,5 @@
-﻿#include "/Engine/Public/Platform.ush"
+﻿#include "/Engine/Private/Common.ush"
+#include "/Engine/Private/DeferredShadingCommon.ush"
 #include "MPMPublic.ush"
 
 RWStructuredBuffer<FParticleData> particleDataBuffer;
@@ -94,6 +95,7 @@ void UpdateOutputTexture(uint3 threadId : SV_DispatchThreadID)
 		OutputTexture[threadId] = float4(0,0,0,0);
 	}
 	float totalWeight = 0.0f;
+	float3 worldCameraPos = View.WorldCameraOrigin;
 	for(int i = -2; i <=2 ; i++)
 		for(int j = -2; j <=2 ; j ++)
 			for(int k = -2; k <=2; k++)
