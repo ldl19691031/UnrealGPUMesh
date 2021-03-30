@@ -97,14 +97,15 @@ public:
 		}
 		{
 			FGPUMeshSceneProxy* Self = this;
+			int NumVertices =  Component->NumVertics;
 			ENQUEUE_RENDER_COMMAND(InitGridIndexBuffers)
 	        (
-	        [Self](FRHICommandList& RHIcmd)
+	        [Self, NumVertices](FRHICommandList& RHIcmd)
 	                {
 	        			FRHIResourceCreateInfo rhiCreateInfo;
 						Self->GridIndexBuffer =  RHICreateStructuredBuffer(
 							sizeof(UINT),
-							sizeof(UINT) * 3000000,
+							sizeof(UINT) * NumVertices * 3,
 							BUF_ShaderResource| BUF_UnorderedAccess,
 							rhiCreateInfo
 						);
